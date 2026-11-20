@@ -10,6 +10,8 @@ const KIND_FLOAT = 100;
 const FLAGS = 2;
 /** SolidWorks stores metres; the viewers (and STEP) work in millimetres. */
 const M_TO_MM = 1000;
+/** Hard cap on decoded vertices so a crafted file can't exhaust memory. */
+export const MAX_VERTICES = 8_000_000;
 
 export interface FaceTess {
   /** Byte offset of the face table in the stream (diagnostics). */
@@ -45,11 +47,19 @@ const readFloats = (v: DataView, at: number, n: number) => {
  * position and a normal channel (float32×3) whose vertex count equals the sum of
  * the strip lengths. Scanning for this signature is robust against the surrounding
  * MFC records, which we don't need to understand to draw the part.
+ *
+ * Throws once the faces found so far exceed `maxVertices` in total, before the
+ * face that crosses the cap is copied, so a crafted stream cannot allocate more
+ * than the cap allows.
  */
-export const scanFaceTables = (stream: Uint8Array): FaceTess[] => {
+export const scanFaceTables = (
+  stream: Uint8Array,
+  maxVertices = MAX_VERTICES
+): FaceTess[] => {
   const v = new DataView(stream.buffer, stream.byteOffset, stream.byteLength);
   const faces: FaceTess[] = [];
   const end = stream.byteLength - 16;
+  let total = 0;
   let o = 0;
   while (o <= end) {
     // Cheap first-byte test before the full header check.
@@ -76,6 +86,10 @@ export const scanFaceTables = (stream: Uint8Array): FaceTess[] => {
       norAt + 16 + 12 * n <= stream.byteLength &&
       isChannel(v, norAt, 12, KIND_FLOAT, n)
     ) {
+      total += n;
+      if (total > maxVertices) {
+        throw new Error(`display mesh too large (more than ${maxVertices} vertices)`);
+      }
       faces.push({
         offset: o,
         stripLengths,
