@@ -339,6 +339,30 @@
 .sw-tree-list .sw-tree-list {
   padding-left: 16px;
 }
+/* Room for the collapse toggles of top-level sub-assemblies. */
+.sw-tree > .sw-tree-list {
+  padding-left: 18px;
+}
+.sw-tree-toggle {
+  float: left;
+  width: 16px;
+  height: 20px;
+  margin: 0 2px 0 -18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sw-muted);
+  cursor: pointer;
+}
+.sw-tree-toggle::before {
+  content: "\25B8";
+}
+.sw-tree-toggle[aria-expanded="true"]::before {
+  content: "\25BE";
+}
+.sw-tree-toggle:focus-visible {
+  outline: 2px solid var(--sw-accent);
+}
 .sw-tree-row {
   display: flex;
   align-items: center;

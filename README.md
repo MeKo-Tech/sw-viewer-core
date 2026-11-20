@@ -101,7 +101,7 @@ props; the other components are plain controlled components:
 | --- | --- |
 | `SwViewer` | `edges`, `colorMode` (`"file"`/`"part"`), `section` (`SwSectionSpec`), `measureMode`, `hiddenComponents`, `viewCube`, `viewCubeLabels`, `formatDimension`, `onMeasure`, `onSelect`, `onPinsChange` |
 | `SwToolbar` | Each group renders when its handler is set: `onEdgesChange`, `onColorModeChange`, `onMeasureModeChange`, `onSectionChange` (+ `box`, `onPickSection`, `sectionPicking`), `onView`, `onResetView`; `children` for extra buttons |
-| `SwComponentTree` | `components`, `hidden`, `onHiddenChange`: checkbox per node (sub-trees toggle together), colour swatch per part file, suppressed nodes disabled |
+| `SwComponentTree` | `components`, `hidden`, `onHiddenChange`: checkbox per node (sub-trees toggle together), colour swatch per part file, suppressed nodes disabled; sub-assemblies collapse, and start collapsed above `collapseAbove` nodes (default 200) |
 | `SwInfoPanel` | `result`, `fileName`, `density`/`defaultDensity`/`onDensityChange`, `locale` |
 | `SwSheets` | `sheets`, `selected` (index, null = 3D model), `onSelect`; `useSheetUrls(sheets)` gives object URLs for a large view |
 | `SwMeasurePanel` | `measurement`, `pins`, `onPin`, `onRemovePin`, `onClear`, `mode`, `components` |

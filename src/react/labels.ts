@@ -78,6 +78,10 @@ export interface SwComponentTreeLabels {
   /** aria-label of a node's checkbox. */
   toggle: (name: string) => string;
   showAll: string;
+  /** aria-label of the button that opens a collapsed sub-assembly. */
+  expand?: (name: string) => string;
+  /** aria-label of the button that collapses an open sub-assembly. */
+  collapse?: (name: string) => string;
 }
 
 export const defaultComponentTreeLabels: SwComponentTreeLabels = {
@@ -87,6 +91,8 @@ export const defaultComponentTreeLabels: SwComponentTreeLabels = {
   suppressed: "suppressed",
   toggle: (name) => `Show ${name}`,
   showAll: "Show all",
+  expand: (name) => `Expand ${name}`,
+  collapse: (name) => `Collapse ${name}`,
 };
 
 export interface SwInfoPanelLabels {
