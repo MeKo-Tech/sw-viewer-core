@@ -62,6 +62,7 @@ const buildGroup = (meshes: SwMesh[]) => {
     if (m.matrix) {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.fromArray(m.matrix);
+      mesh.matrixWorldNeedsUpdate = true;
     }
     group.add(mesh);
   }
