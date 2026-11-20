@@ -215,6 +215,44 @@ a color override. The demo renders those ranges using the mesh color or default
 grey. Synthetic tests cover solid-color overrides. The verified overrides in the
 real sample parts were textured.
 
+## Geometry analysis
+
+`parseSwFile` analyses the display mesh after decoding (`src/geometry/`). The
+algorithms come from the colleague's CAD-Viewer-Projekt (`src/geom.js` and the
+section snapping in `src/app.js`) and were ported to TypeScript on flat typed
+arrays.
+
+- **Faces.** `SwMesh.faces` has one `SwFaceInfo` per face range. A face is a plane when
+  all vertex normals lie within 1e-5 of their mean. It is a cylinder when the normals
+  are perpendicular to an axis, which is the smallest eigenvector of the normals'
+  scatter matrix, and the points fit a circle (Kasa fit). It is a cone when the
+  normals' component along that axis is constant, and a sphere when the points fit a
+  sphere. Anything else is `other` (freeform). The tolerance is max(2e-4 mm, face
+  size × 2e-5). Radii come from the fit, not the facets: the Ø20 bore in
+  `wuerfel_L20` measures 10.000, while its facets reach only 9.8. A cylinder is
+  `full` when its points fill all twelve 30° sectors.
+- **Edges.** `SwMesh.edges` holds line segments, and `edgeRanges` holds one polyline
+  per edge with its type (line, circle or arc, curve) and the two faces it borders.
+  Edges are the triangle sides that a face uses only once. Vertices are welded on a
+  1e-4 mm grid. The segments are grouped by face pair, chained, and split where the
+  direction turns by more than 50°.
+- **Stats.** `SwParseResult.stats` holds the world-space bounding box, volume and
+  area over every mesh, hidden instances included. The volume uses the divergence
+  theorem, with each triangle oriented along its vertex normals. The box adds the
+  analytic extent of full outer cylinders, so `zylinder` (Ø50×80) measures
+  50 × 80 × 50 instead of the facets' 49.64.
+- **Budget.** Assembly instances share `positions`, so each distinct mesh is analysed
+  once. Above 1.5 M distinct vertices, `parseSwFile` skips the face and edge analysis
+  with a warning but still computes the stats. A synthetic mesh with 1.5 M vertices
+  and 7500 faces takes about 1.1 s. The sample parts take under 10 ms each.
+- **Measuring** runs on the main thread on picked elements (`SwPick`: a face or edge
+  of a mesh, or a world point). It honours the instance `matrix`, which must be rigid
+  or uniformly scaled, and returns plain world-space data: `describe`, `measurePair`
+  (values with optional `from`/`to` dimension lines), `angleBetween` / `angle3` (with
+  arc geometry), `closestPoint`, `snapPoints`, and `sectionContour`. `sectionContour`
+  chains the plane cut per face and moves the points onto the fitted cylinder or
+  sphere, so the `wuerfel_L20` bore's contour measures Ø20.000.
+
 ## Open points
 
 - **Colors.**

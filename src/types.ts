@@ -1,33 +1,59 @@
 export type Rgb = [number, number, number];
 export type Vec3 = [number, number, number];
 
-/** Surface recognised on one SolidWorks face from its display triangles (mesh space, mm). */
+/**
+ * Surface recognised on one SolidWorks face from its display triangles (mesh space, mm).
+ * Radii come from least-squares fits, so they are exact even where the facets cut the
+ * surface (a Ø20 hole reads 10.000, not the facets' 9.8). Angles are in degrees.
+ */
 export type SwFaceInfo =
   | { type: "plane"; area: number; normal: Vec3; point: Vec3 }
   | {
       type: "cylinder";
       area: number;
+      /** Unit axis direction (sign arbitrary). */
       axis: Vec3;
-      /** A point on the axis. */
+      /** Point on the axis, halfway along the face's axial extent. */
       center: Vec3;
       radius: number;
-      /** Extent along the axis, measured from `center`. */
-      axisMin: number;
-      axisMax: number;
+      /** Axial extent of the face. */
+      height: number;
       /** true for a hole (normals point to the axis). */
       inner: boolean;
       /** true when the face covers the full circumference. */
       full: boolean;
+      /** Covered circumference in degrees (360 when `full`). */
+      arcDeg: number;
     }
-  | { type: "cone"; area: number; axis: Vec3; apex: Vec3; halfAngle: number }
+  | {
+      type: "cone";
+      area: number;
+      /** Unit axis direction (sign arbitrary). */
+      axis: Vec3;
+      /** Point on the axis, halfway along the face's axial extent. */
+      center: Vec3;
+      /** Absent when the apex fit was ill-conditioned. */
+      apex?: Vec3;
+      halfAngle: number;
+    }
   | { type: "sphere"; area: number; center: Vec3; radius: number; inner: boolean }
   | { type: "other"; area: number };
 
-/** Classification of one extracted edge polyline. */
+/** Classification of one extracted edge polyline (mesh space, mm; angles in degrees). */
 export type SwEdgeInfo =
   | { type: "line"; start: Vec3; end: Vec3; length: number }
-  | { type: "circle"; center: Vec3; normal: Vec3; radius: number; full: boolean; length: number }
-  | { type: "curve"; length: number };
+  | {
+      type: "circle";
+      center: Vec3;
+      normal: Vec3;
+      radius: number;
+      /** true for a closed circle, false for an arc. */
+      full: boolean;
+      /** Swept angle in degrees (360 when `full`). */
+      angle: number;
+      length: number;
+    }
+  | { type: "curve"; length: number; closed: boolean };
 
 /** One renderable mesh. Same shape as the STEP viewers' meshes, plus face ranges. */
 export interface SwMesh {
@@ -51,8 +77,11 @@ export interface SwMesh {
    * faces, split at sharp kinks. Absent when the mesh exceeded the analysis budget.
    */
   edges?: Float32Array;
-  /** Polyline per edge: start offset (in segments) into `edges`, segment count, type. */
-  edgeRanges?: { start: number; count: number; info: SwEdgeInfo }[];
+  /**
+   * Polyline per edge: start offset (in segments) into `edges`, segment count, type,
+   * and the indices (into `faces`) of the two faces it borders (-1 for an open border).
+   */
+  edgeRanges?: { start: number; count: number; info: SwEdgeInfo; faces: [number, number] }[];
   /** One entry per `faceRanges` entry. */
   faces?: SwFaceInfo[];
 }
@@ -72,7 +101,12 @@ export interface SwComponentNode {
   children: SwComponentNode[];
 }
 
-/** Bounding box and mass properties of the whole model (world space, mm). */
+/**
+ * Bounding box and mass properties of the whole model (world space, mm), summed over
+ * every mesh in `meshes`, hidden instances included. The box includes the analytic
+ * extent of full outer cylinders, so a Ø50 shaft measures 50 even though its facets
+ * stay inside the circle.
+ */
 export interface SwModelStats {
   bboxMin: Vec3;
   bboxMax: Vec3;

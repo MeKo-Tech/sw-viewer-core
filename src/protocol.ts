@@ -16,7 +16,7 @@ export type SwParseReply =
 export const transferables = (r: SwParseResult): ArrayBuffer[] => {
   const out = new Set<ArrayBuffer>();
   for (const m of r.meshes) {
-    for (const a of [m.positions, m.normals, m.indices]) {
+    for (const a of [m.positions, m.normals, m.indices, m.edges]) {
       if (a) {
         out.add(a.buffer as ArrayBuffer);
       }

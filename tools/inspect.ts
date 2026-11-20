@@ -63,6 +63,24 @@ if (r.properties) {
     for (const [k, v] of Object.entries(r.properties)) console.log(`  ${k} = ${v}`);
   }
 }
+const tally = (types: string[]) => {
+  const out: Record<string, number> = {};
+  for (const t of types) out[t] = (out[t] ?? 0) + 1;
+  return Object.entries(out).map(([t, n]) => `${t}=${n}`).join(" ");
+};
+for (const m of new Set(r.meshes.map((m) => m.faces)).values()) {
+  if (!m) continue;
+  console.log(`  face types: ${tally(m.map((f) => f.type))}`);
+}
+for (const e of new Set(r.meshes.map((m) => m.edgeRanges)).values()) {
+  if (!e) continue;
+  console.log(`  edge types: ${tally(e.map((x) => x.info.type))}`);
+}
+if (r.stats) {
+  const s = r.stats;
+  const size = s.bboxMax.map((v, i) => (v - s.bboxMin[i]).toFixed(3)).join(" × ");
+  console.log(`stats bbox=${size}mm volume=${(s.volume / 1000).toFixed(2)}cm3 area=${(s.area / 100).toFixed(2)}cm2`);
+}
 for (const w of r.warnings) {
   console.log("warning:", w);
 }

@@ -7,6 +7,7 @@ import { readAssembly } from "./assembly.ts";
 import { readDrawing } from "./drawing.ts";
 import { buildBodyMesh, MAX_VERTICES, scanFaceTables } from "./displayMesh.ts";
 import { readProperties } from "./properties.ts";
+import { analyzeResult } from "./geometry/analyze.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
 import { readBodyColor, readFaceColors } from "./visualProps.ts";
 
@@ -32,8 +33,15 @@ const readOptional = async (c: SwContainer, name: string) => {
   return e && e.size > 0 ? e.read() : undefined;
 };
 
-/** Decodes a SolidWorks file into renderable meshes plus the embedded thumbnail. */
-export const parseSwFile = async (
+/** Decodes a SolidWorks file into renderable meshes plus the embedded thumbnail,
+ *  with faces, edges and model stats from the geometry analysis. */
+export const parseSwFile = async (bytes: Uint8Array): Promise<SwParseResult> => {
+  const result = await decodeSwFile(bytes);
+  analyzeResult(result);
+  return result;
+};
+
+const decodeSwFile = async (
   bytes: Uint8Array
 ): Promise<SwParseResult> => {
   const c = openSwContainer(bytes);
