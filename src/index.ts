@@ -1,12 +1,18 @@
 export {
   containerKind,
   containerVersion,
+  MAX_ENTRY_SIZE,
   openSwContainer,
   SwContainerError,
   type SwContainer,
   type SwEntry,
 } from "./container.ts";
-export { buildBodyMesh, scanFaceTables, signedVolume } from "./displayMesh.ts";
+export {
+  buildBodyMesh,
+  MAX_VERTICES,
+  scanFaceTables,
+  signedVolume,
+} from "./displayMesh.ts";
 export { parseSwFile } from "./parse.ts";
 export type { SwParseReply, SwParseRequest } from "./protocol.ts";
 export type { Rgb, SwDocumentKind, SwMesh, SwParseResult } from "./types.ts";

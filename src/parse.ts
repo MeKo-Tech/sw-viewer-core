@@ -8,9 +8,6 @@ import { buildBodyMesh, scanFaceTables } from "./displayMesh.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
 import { readBodyColor, readFaceColors } from "./visualProps.ts";
 
-/** Hard cap on decoded vertices so a crafted file can't exhaust memory. */
-const MAX_VERTICES = 8_000_000;
-
 const documentKind = (c: SwContainer): SwDocumentKind => {
   const names = c.entries.map((e) => e.name);
   if (names.some((n) => /COMPINSTANCETREE/i.test(n))) {
@@ -62,11 +59,8 @@ export const parseSwFile = async (
   }
 
   const displayLists = await readOptional(c, "Contents/DisplayLists");
+  // Throws past MAX_VERTICES while scanning, before the faces are copied.
   const faces = displayLists ? scanFaceTables(displayLists) : [];
-  const vertexCount = faces.reduce((s, f) => s + f.positions.length / 3, 0);
-  if (vertexCount > MAX_VERTICES) {
-    throw new Error(`display mesh too large (${vertexCount} vertices)`);
-  }
   const mesh = buildBodyMesh(faces);
   if (!mesh) {
     warnings.push(

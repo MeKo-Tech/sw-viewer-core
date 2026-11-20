@@ -9,6 +9,10 @@
 const MARKER = [0x14, 0x00, 0x06, 0x00, 0x08, 0x00];
 const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
+/** Hard cap on an entry's declared uncompressed size, so a crafted file can't make
+ *  the inflater allocate gigabytes. Real DisplayLists stay far below this. */
+export const MAX_ENTRY_SIZE = 256 * 1024 * 1024;
+
 export class SwContainerError extends Error {
   override name = "SwContainerError";
 }
@@ -91,11 +95,31 @@ const crc32 = (d: Uint8Array) => {
   return (c ^ 0xffffffff) >>> 0;
 };
 
-const inflateRaw = async (data: Uint8Array) => {
-  const stream = new Blob([data as BlobPart])
+/** Inflates raw DEFLATE into a buffer of exactly `size` bytes. Stops reading and
+ *  throws as soon as the output would exceed `size`, so a DEFLATE bomb never gets
+ *  buffered. Returns fewer bytes if the stream ends early; the caller checks that. */
+const inflateRaw = async (data: Uint8Array, size: number, name: string) => {
+  const reader = new Blob([data as BlobPart])
     .stream()
-    .pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .getReader();
+  const out = new Uint8Array(size);
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (total + value.length > size) {
+      await reader.cancel().catch(() => {});
+      throw new SwContainerError(
+        `entry "${name}" inflates to more than its declared ${size} bytes`
+      );
+    }
+    out.set(value, total);
+    total += value.length;
+  }
+  return total === size ? out : out.subarray(0, total);
 };
 
 interface LocalHeader {
@@ -170,16 +194,22 @@ const toEntry = (d: Uint8Array, lh: LocalHeader): SwEntry => ({
   compressedSize: lh.compressedSize,
   size: lh.size,
   read: async () => {
+    const name = decodeName(lh.rawName);
+    if (lh.size > MAX_ENTRY_SIZE) {
+      throw new SwContainerError(
+        `entry "${name}" declares ${lh.size} bytes, more than the ${MAX_ENTRY_SIZE} byte limit`
+      );
+    }
     if (lh.size === 0) {
       return new Uint8Array(0);
     }
     const raw = await inflateRaw(
-      d.subarray(lh.dataStart, lh.dataStart + lh.compressedSize)
+      d.subarray(lh.dataStart, lh.dataStart + lh.compressedSize),
+      lh.size,
+      name
     );
     if (raw.length !== lh.size || crc32(raw) !== lh.crc) {
-      throw new SwContainerError(
-        `length/CRC mismatch for entry "${decodeName(lh.rawName)}"`
-      );
+      throw new SwContainerError(`length/CRC mismatch for entry "${name}"`);
     }
     return raw;
   },
