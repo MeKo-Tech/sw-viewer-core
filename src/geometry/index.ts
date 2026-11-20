@@ -1,0 +1,38 @@
+// Geometry analysis and measuring. Worker-safe: no DOM, no three.js.
+export {
+  analyzeEdge,
+  analyzeFace,
+  analyzeMesh,
+  analyzeResult,
+  computeStats,
+  GEOMETRY_VERTEX_BUDGET,
+  massProperties,
+  type MassProperties,
+  snapPoints,
+  type SwSnapPoint,
+} from "./analyze.ts";
+export {
+  angle3,
+  angleBetween,
+  closestOnFace,
+  closestOnTriangle,
+  closestPoint,
+  defaultMeasureItemLabels,
+  defaultShapeLabels,
+  describe,
+  measureItem,
+  measurePair,
+  SW_MEASURE_KINDS,
+  SW_SHAPES,
+  sectionContour,
+  type SwAngle,
+  type SwDescription,
+  type SwMeasureItem,
+  type SwMeasureKind,
+  type SwMeasureUnit,
+  type SwPick,
+  type SwPlane,
+  type SwSectionContour,
+  type SwShape,
+} from "./measure.ts";
+export { eig3, fitCircle, fitSphere, invertAffine, transformDir, transformPoint } from "./linalg.ts";

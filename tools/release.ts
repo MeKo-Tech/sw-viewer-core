@@ -48,6 +48,7 @@ const copy = (from: string, to: string) => {
 for (const f of readdirSync(lib, { recursive: true }) as string[]) {
   if (statSync(join(lib, f)).isFile()) copy(join(lib, f), join(stage, "lib", f));
 }
+copy(join(root, "src/react/sw-viewer.css"), join(stage, "lib/react/sw-viewer.css"));
 copy(join(root, "README.md"), join(stage, "README.md"));
 copy(join(root, "LICENSE"), join(stage, "LICENSE"));
 const entry = (name: string) => ({ types: `./lib/${name}.d.ts`, default: `./lib/${name}.js` });
@@ -64,8 +65,9 @@ writeFileSync(
         "./worker": entry("worker"),
         "./three": entry("three/index"),
         "./react": entry("react/index"),
+        "./sw-viewer.css": "./lib/react/sw-viewer.css",
       },
-      sideEffects: ["./lib/worker.js"],
+      sideEffects: ["./lib/worker.js", "*.css"],
     },
     null,
     2,

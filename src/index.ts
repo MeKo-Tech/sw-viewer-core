@@ -15,7 +15,19 @@ export {
 } from "./displayMesh.ts";
 export { parseSwFile } from "./parse.ts";
 export type { SwParseReply, SwParseRequest } from "./protocol.ts";
-export type { Rgb, SwDocumentKind, SwMesh, SwParseResult } from "./types.ts";
+export type {
+  Rgb,
+  SwComponentNode,
+  SwDocumentKind,
+  SwEdgeInfo,
+  SwFaceInfo,
+  SwMesh,
+  SwModelStats,
+  SwParseResult,
+  SwSheet,
+  Vec3,
+} from "./types.ts";
+export * from "./geometry/index.ts";
 export {
   DEFAULT_PARSE_TIMEOUT_MS,
   type ParseInWorkerOptions,

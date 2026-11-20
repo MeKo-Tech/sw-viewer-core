@@ -3,19 +3,16 @@
 // The file is a ZIP-like archive behind an 8-byte header: the ZIP signatures are
 // replaced, entry names are nibble-swapped per byte and the payload is raw DEFLATE.
 // Ported from Solidworks-File-Decoder/freecad/SldImport/sldcontainer.py (our own code).
-// The pre-2015 OLE2 container is detected but not read yet.
+// The pre-2015 OLE2 compound file is read by ole.ts behind the same interface.
+
+import { inflateBounded, MAX_ENTRY_SIZE, SwContainerError } from "./inflate.ts";
+import { openOleContainer } from "./ole.ts";
+
+export { MAX_ENTRY_SIZE, SwContainerError };
 
 /** Version 20, flags 6, method 8 (DEFLATE): marks local and central headers. */
 const MARKER = [0x14, 0x00, 0x06, 0x00, 0x08, 0x00];
 const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
-
-/** Hard cap on an entry's declared uncompressed size, so a crafted file can't make
- *  the inflater allocate gigabytes. Real DisplayLists stay far below this. */
-export const MAX_ENTRY_SIZE = 256 * 1024 * 1024;
-
-export class SwContainerError extends Error {
-  override name = "SwContainerError";
-}
 
 export type SwContainerKind = "zip" | "ole2" | "unknown";
 
@@ -93,33 +90,6 @@ const crc32 = (d: Uint8Array) => {
     c = crcTable[(c ^ d[i]) & 0xff] ^ (c >>> 8);
   }
   return (c ^ 0xffffffff) >>> 0;
-};
-
-/** Inflates raw DEFLATE into a buffer of exactly `size` bytes. Stops reading and
- *  throws as soon as the output would exceed `size`, so a DEFLATE bomb never gets
- *  buffered. Returns fewer bytes if the stream ends early; the caller checks that. */
-const inflateRaw = async (data: Uint8Array, size: number, name: string) => {
-  const reader = new Blob([data as BlobPart])
-    .stream()
-    .pipeThrough(new DecompressionStream("deflate-raw"))
-    .getReader();
-  const out = new Uint8Array(size);
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (total + value.length > size) {
-      await reader.cancel().catch(() => {});
-      throw new SwContainerError(
-        `entry "${name}" inflates to more than its declared ${size} bytes`
-      );
-    }
-    out.set(value, total);
-    total += value.length;
-  }
-  return total === size ? out : out.subarray(0, total);
 };
 
 interface LocalHeader {
@@ -203,7 +173,7 @@ const toEntry = (d: Uint8Array, lh: LocalHeader): SwEntry => ({
     if (lh.size === 0) {
       return new Uint8Array(0);
     }
-    const raw = await inflateRaw(
+    const raw = await inflateBounded(
       d.subarray(lh.dataStart, lh.dataStart + lh.compressedSize),
       lh.size,
       name
@@ -243,9 +213,7 @@ const scanLocalHeaders = (d: Uint8Array, v: DataView) => {
 export const openSwContainer = (d: Uint8Array): SwContainer => {
   const kind = containerKind(d);
   if (kind === "ole2") {
-    throw new SwContainerError(
-      "SolidWorks files before 2015 (OLE2 container) are not supported yet"
-    );
+    return openOleContainer(d);
   }
   if (kind === "unknown") {
     throw new SwContainerError("not a SolidWorks file");

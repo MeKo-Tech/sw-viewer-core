@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { readAssemblyMeshes } from "../src/assembly.ts";
+import { directoryOrder, readAssembly, readAssemblyMeshes } from "../src/assembly.ts";
+import { instancePathOf, parseComponentTree } from "../src/assemblyTree.ts";
 import type { SwContainer, SwEntry } from "../src/container.ts";
 
 const u16 = (value: number) => {
@@ -209,4 +210,323 @@ it("stops an oversized face group at a cache with an ambiguous signature", async
 
   assert.deepEqual(meshes, []);
   assert.ok(warnings.length > 0);
+});
+
+// ---------- component tree (swXmlContents/COMPINSTANCETREE) ----------
+
+const T_IDENTITY = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1";
+/** Row-vector convention: rows 0-2 rotation, row 3 translation in metres, last value scale. */
+const T_ROT_Z_90_AT_X = "0 1 0 0 -1 0 0 0 0 0 1 0 0.1 0 0 1";
+const T_AT_Y = "1 0 0 0 0 1 0 0 0 0 1 0 0 0.02 0 1";
+
+const reference = (id: number, name: string, number: number, model: number, transform: string, extra = "") =>
+  `<swReference id="${id}" swComponentName="${name}" swReferenceNumber="${number}" swConfigurationName="Default" ` +
+  `swSuppressed="NO" swHidden="NO" swModelRef="${model}" swTransform="${transform}" ${extra}/>`;
+
+/** Top: Sub-1 (rotated, hidden) containing plate-1 and plate-2, plate-3, Sub-2 (suppressed), bolt-1 (suppressed). */
+const treeXml = (opts: { hiddenSub?: boolean } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
+<swSolidWorks xmlns="http://www.solidworks.com/sw2003/schema">
+<swHeader>
+<swFile id="1" swDocType="ASSEMBLY" swPath="C:\\cad\\Top.SLDASM"/>
+<swFile id="2" swDocType="ASSEMBLY" swPath="C:\\cad\\Sub.SLDASM"/>
+<swFile id="3" swDocType="PART" swPath="C:\\parts\\plate.SLDPRT"/>
+<swFile id="4" swDocType="PART" swPath="C:\\parts\\bolt.SLDPRT"/>
+</swHeader>
+<swModelList>
+<swModel id="13" swFileRef="3"/>
+<swModel id="14" swFileRef="4"/>
+<swModel id="12" swFileRef="2">
+${reference(20, "plate", 1, 13, T_AT_Y)}
+${reference(21, "plate", 2, 13, T_IDENTITY)}
+</swModel>
+<swModel id="11" swFileRef="1">
+${reference(22, "Sub", 1, 12, T_ROT_Z_90_AT_X, opts.hiddenSub === false ? "" : 'swHidden="YES"').replace('swHidden="NO" ', "")}
+${reference(23, "plate", 3, 13, T_IDENTITY)}
+${reference(24, "Sub", 2, 12, T_IDENTITY).replace('swSuppressed="NO"', 'swSuppressed="YES"')}
+${reference(25, "bolt", 1, 14, T_IDENTITY).replace('swSuppressed="NO"', 'swSuppressed="YES"')}
+</swModel>
+</swModelList>
+<swConfigurationList><swConfiguration swMostRecentConfiguration="YES" swModelRef="11"/></swConfigurationList>
+</swSolidWorks>`;
+
+const near = (actual: number[] | undefined, expected: number[]) => {
+  assert.ok(actual);
+  assert.equal(actual.length, expected.length);
+  actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-9, `index ${i}: ${value} != ${expected[i]}`));
+};
+
+it("parses the component tree with ids, flags and composed transforms", () => {
+  const tree = parseComponentTree(new TextEncoder().encode(treeXml()));
+  assert.ok(tree);
+  assert.deepEqual(tree.warnings, []);
+  assert.deepEqual(tree.roots.map((n) => [n.id, n.kind, n.hidden, n.suppressed]), [
+    ["Sub-1", "assembly", true, false],
+    ["plate-3", "part", false, false],
+    ["Sub-2", "assembly", false, true],
+    ["bolt-1", "part", false, true],
+  ]);
+  const [sub, , suppressedSub] = tree.roots;
+  assert.equal(sub.path, "C:\\cad\\Sub.SLDASM");
+  assert.equal(sub.configuration, "Default");
+  // Hidden propagates; a suppressed sub-assembly is not expanded.
+  assert.deepEqual(sub.children.map((n) => [n.id, n.name, n.hidden]), [
+    ["Sub-1/plate-1", "plate-1", true],
+    ["Sub-1/plate-2", "plate-2", true],
+  ]);
+  assert.deepEqual(suppressedSub.children, []);
+
+  assert.deepEqual(tree.leaves.map((l) => [l.node.id, l.suppressed]), [
+    ["Sub-1/plate-1", false], ["Sub-1/plate-2", false], ["plate-3", false], ["bolt-1", true],
+  ]);
+  assert.equal(tree.leaves[0].partKey, "C:\\parts\\plate.SLDPRT|Default");
+  // Sub-1 rotates 90° about z and sits at x = 100 mm; plate-1 sits at y = 20 mm inside it,
+  // so it ends up at x = 100 - 20.
+  near(tree.leaves[1].matrix, [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1]);
+  near(tree.leaves[0].matrix, [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 80, 0, 0, 1]);
+  assert.equal(tree.componentKeys.get("Sub|plate-2"), "C:\\parts\\plate.SLDPRT|Default");
+  assert.equal(tree.componentKeys.get("Top|bolt-1"), "C:\\parts\\bolt.SLDPRT|Default");
+  assert.equal(tree.componentKeys.has("Top|Sub-1"), false);
+});
+
+it("never throws on malformed trees", () => {
+  assert.equal(parseComponentTree("garbage"), undefined);
+  assert.equal(parseComponentTree("<swSolidWorks><swModel"), undefined);
+  assert.equal(parseComponentTree(new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0xd8, 0x00])), undefined);
+
+  const badTransform = parseComponentTree(treeXml().replace(T_AT_Y, "1 2 x"));
+  assert.ok(badTransform);
+  assert.ok(badTransform.warnings.some((w) => /transform/.test(w)));
+  near(badTransform.leaves[0].matrix, badTransform.leaves[1].matrix);
+
+  // Sub references itself: the walk stops instead of recursing forever.
+  const cyclic = parseComponentTree(treeXml().replace(reference(21, "plate", 2, 13, T_IDENTITY), reference(21, "Sub", 9, 12, T_IDENTITY)));
+  assert.ok(cyclic);
+  assert.ok(cyclic.warnings.some((w) => /cyclic/.test(w)));
+});
+
+it("maps cache instance names to tree ids, also for files saved as a copy", () => {
+  assert.equal(instancePathOf("Sub-1@Top/plate-2@Sub"), "Sub-1/plate-2");
+  assert.equal(instancePathOf("plate-1@OldName"), "plate-1");
+});
+
+const treeEntry = (xml: string) => ({ "swXmlContents/COMPINSTANCETREE": new TextEncoder().encode(xml) });
+
+it("places tree instances with cached meshes, flags and shared geometry", async () => {
+  // Inline caches for plate-3 and Sub-1/plate-1; the cache transforms are deliberately
+  // wrong: the tree is the source of placements.
+  const stream = Buffer.concat([
+    firstComponent, component("plate-3@Top", 5), face,
+    nextComponent, component("Sub-1@Top/plate-1@Sub", 5), face,
+  ]);
+  const result = await readAssembly(container(treeEntry(treeXml())), stream, 6);
+
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.components?.map((n) => n.id), ["Sub-1", "plate-3", "Sub-2", "bolt-1"]);
+  assert.deepEqual(result.meshes.map((m) => [m.componentId, m.name, m.visible]), [
+    ["Sub-1/plate-1", "plate-1", false],
+    ["Sub-1/plate-2", "plate-2", false],
+    ["plate-3", "plate-3", undefined],
+  ]);
+  near(result.meshes[0].matrix, [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 80, 0, 0, 1]);
+  near(result.meshes[2].matrix, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  // plate-2 has no own cache and reuses the geometry of the same part.
+  assert.equal(result.meshes[1].positions, result.meshes[0].positions);
+  assert.equal(result.meshes[1].indices, result.meshes[0].indices);
+});
+
+it("resolves directory rows that reuse the geometry of another instance", async () => {
+  const signature = u32(0x4462ab09, 0x8307df03);
+  const cacheName = "000-000-001";
+  const referenceRow = (id: number, instance: string) =>
+    Buffer.concat([u32(id), cstring(instance), Buffer.alloc(12), signature, u32(0x11111111, 0x22222222), cstring(""), u32(0xffffffff, 0)]);
+  const c = container({
+    ...treeEntry(treeXml({ hiddenSub: false })),
+    "FaceTessellations/Directory": Buffer.concat([
+      u32(2, 1, 3),
+      directoryEntry(0, "plate-3@Top", cacheName, signature),
+      referenceRow(5, "Sub-1@Top/plate-1@Sub"),
+      referenceRow(6, "Sub-1@Top/plate-2@Sub"),
+    ]),
+    ["FaceTessellations/" + cacheName]: cacheGroup(0, signature, 1),
+  });
+  const result = await readAssembly(c, undefined, 3);
+
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.meshes.map((m) => [m.componentId, m.visible]), [
+    ["Sub-1/plate-1", undefined], ["Sub-1/plate-2", undefined], ["plate-3", undefined],
+  ]);
+  assert.ok(result.meshes.every((m) => m.positions === result.meshes[0].positions));
+});
+
+/** Body header of a cache stream: the faces after it belong to body `index`. */
+const bodyHeader = (index: number, faces: number) =>
+  Buffer.concat([u32(index, 0, 0, faces, 0), u32(1, 1, 0, 0), Buffer.from([0x96, 0, 0x20, 0])]);
+
+const quad = Buffer.concat([
+  u32(4, 8, 2, 1, 4),
+  u32(12, 100, 2, 4),
+  floats([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0], 4),
+  u32(12, 100, 2, 4),
+  floats([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 4),
+]);
+
+const twoPartTree = `<swSolidWorks><swHeader>
+<swFile id="1" swDocType="ASSEMBLY" swPath="Top.SLDASM"/>
+<swFile id="2" swDocType="PART" swPath="a.SLDPRT"/>
+<swFile id="3" swDocType="PART" swPath="b.SLDPRT"/>
+</swHeader><swModelList>
+<swModel id="12" swFileRef="2"/><swModel id="13" swFileRef="3"/>
+<swModel id="11" swFileRef="1">
+${reference(20, "b", 1, 13, T_IDENTITY)}
+${reference(21, "a", 1, 12, T_AT_Y)}
+${reference(22, "a", 2, 12, T_IDENTITY, 'swHidden="YES"').replace('swHidden="NO" ', "")}
+</swModel></swModelList></swSolidWorks>`;
+
+it("falls back to body headers and the directory order when the directory rows do not parse", async () => {
+  const stream = Buffer.concat([face, bodyHeader(1, 1), quad]);
+  // Version 3 is unknown to the row reader; the instance names and stream names still give the order.
+  const directory = Buffer.concat([u32(3, 1, 2), u32(1), cstring("a-1@OldTop"), cstring("000-000-001"), u32(2), cstring("b-1@OldTop"), cstring("000-000-001")]);
+  const c = container({
+    ...treeEntry(twoPartTree),
+    "FaceTessellations/Directory": directory,
+    "FaceTessellations/000-000-001": stream,
+  });
+  const result = await readAssembly(c, undefined, 7);
+
+  assert.deepEqual(result.meshes.map((m) => [m.componentId, m.positions.length / 3, m.visible]), [
+    ["b-1", 4, undefined], ["a-1", 3, undefined], ["a-2", 3, false],
+  ]);
+  assert.equal(result.meshes[1].positions, result.meshes[2].positions);
+  assert.equal(result.meshes[1].matrix?.[13], 20);
+  assert.ok(result.warnings.some((w) => /directory order/.test(w)));
+
+  // Without a directory, bodies follow the order in which parts first appear in the tree.
+  const swapped = Buffer.concat([quad, bodyHeader(1, 1), face]);
+  const noDirectory = await readAssembly(container({ ...treeEntry(twoPartTree), "FaceTessellations/000-000-001": swapped }), undefined, 7);
+  assert.deepEqual(noDirectory.meshes.map((m) => [m.componentId, m.positions.length / 3]), [["b-1", 4], ["a-1", 3], ["a-2", 3]]);
+
+  await assert.rejects(readAssembly(c, undefined, 6), /too large/i);
+});
+
+it("does not guess when a cache stream has no body headers", async () => {
+  const c = container({ ...treeEntry(twoPartTree), "FaceTessellations/000-000-001": Buffer.concat([face, quad]) });
+  const result = await readAssembly(c, undefined, 7);
+  assert.deepEqual(result.meshes, []);
+  assert.equal(result.components?.length, 3);
+  assert.ok(result.warnings.some((w) => /unavailable for 3 of 3/.test(w)));
+});
+
+it("keeps the cache placements when the tree is unreadable or matches nothing", async () => {
+  const stream = Buffer.concat([firstComponent, component("plate-1@Asm", 0.125), face]);
+  const garbage = await readAssembly(container(treeEntry("not xml")), stream, 3);
+  assert.deepEqual(garbage.meshes.map((m) => m.name), ["plate-1@Asm"]);
+  assert.equal(garbage.components, undefined);
+  assert.ok(garbage.warnings.some((w) => /tree could not be read/.test(w)));
+
+  const unmatched = await readAssembly(container(treeEntry(twoPartTree)), stream, 3);
+  assert.deepEqual(unmatched.meshes.map((m) => m.name), ["plate-1@Asm"]);
+  assert.equal(unmatched.components?.length, 3);
+  assert.ok(unmatched.warnings.some((w) => /without the component tree/.test(w)));
+
+  assert.deepEqual(await readAssembly(container(), undefined, 3), { meshes: [], warnings: [] });
+});
+
+it("suffixes same-named siblings in order and handles many of them quickly", () => {
+  const tree = (refs: string) => `<swSolidWorks><swHeader><swFile id="1" swDocType="ASSEMBLY" swPath="Top.SLDASM"/>
+<swFile id="2" swDocType="PART" swPath="a.SLDPRT"/></swHeader><swModelList><swModel id="12" swFileRef="2"/>
+<swModel id="11" swFileRef="1">${refs}</swModel></swModelList></swSolidWorks>`;
+  const r = (name: string) => `<swReference swComponentName="${name}" swModelRef="12" swTransform="${T_IDENTITY}"/>`;
+  // A literal "a#3" takes that id first; the suffix counter skips it.
+  const small = parseComponentTree(tree([r("a"), r("a"), r("a#3"), r("a"), r("b"), r("a")].join("")))!;
+  assert.deepEqual(small.roots.map((n) => n.id), ["a", "a#2", "a#3", "a#4", "b", "a#5"]);
+
+  const t0 = performance.now();
+  const big = parseComponentTree(tree(r("a").repeat(20_000)))!;
+  assert.ok(performance.now() - t0 < 1000, "took too long");
+  assert.equal(big.roots.length, 20_000);
+  assert.equal(new Set(big.roots.map((n) => n.id)).size, 20_000);
+  assert.equal(big.roots.at(-1)!.id, "a#20000");
+});
+
+// The former directoryOrder (indexOf sweeps per entry), as the reference.
+const directoryOrderReference = (directory: Uint8Array, componentKeys: Map<string, string>) => {
+  const entries = [...componentKeys].map(([key, partKey]) => {
+    const bar = key.indexOf("|");
+    return { assembly: key.slice(0, bar), instance: key.slice(bar + 1), partKey };
+  });
+  for (const alignment of [0, 1]) {
+    const text = new TextDecoder("utf-16le").decode(directory.subarray(alignment, alignment + ((directory.length - alignment) & ~1)));
+    const hits: { start: number; end: number; partKey: string }[] = [];
+    for (const { assembly, instance, partKey } of entries) {
+      const needle = instance + "@" + assembly;
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (text[i + needle.length] !== "/") hits.push({ start: i, end: i + needle.length, partKey });
+      }
+    }
+    for (const { instance, partKey } of entries) {
+      const needle = instance + "@";
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (hits.some((h) => h.start <= i && i < h.end)) continue;
+        let end = i + needle.length;
+        while (end < text.length && /[\p{L}\p{N} _.-]/u.test(text[end])) end++;
+        if (text[end] !== "/") hits.push({ start: i, end, partKey });
+      }
+    }
+    hits.sort((a, b) => a.start - b.start || b.end - a.end);
+    const unique = hits.filter((h, j) => j === 0 || h.start !== hits[j - 1].start);
+    const order: string[] = [];
+    unique.forEach((h, j) => {
+      const next = unique[j + 1]?.start ?? text.length;
+      if (/\d{3}-\d{3}-\d{3}/.test(text.slice(h.end, next))) order.push(h.partKey);
+    });
+    if (order.length) return order;
+  }
+  return [];
+};
+
+const utf16 = (text: string, pad = 0) => {
+  const out = new Uint8Array(pad + 2 * text.length);
+  for (let i = 0; i < text.length; i++) {
+    out[pad + 2 * i] = text.charCodeAt(i) & 0xff;
+    out[pad + 2 * i + 1] = text.charCodeAt(i) >> 8;
+  }
+  return out;
+};
+
+it("directoryOrder matches the former indexOf sweeps on random directories", () => {
+  let seed = 7;
+  const rnd = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+    return (seed >>> 8) % n;
+  };
+  const names = ["a-1", "a-2", "b-1", "ab-1", "a", "W\u00fcrfel-1", "x@y-1", ""];
+  const assemblies = ["Top", "Top2", "Sub", "T", ""];
+  const pieces = [...names, ...assemblies, "@", "/", " ", "_", ".", "000-111-222", "12-345", "\u0000", "\u0007", "Z",
+    "a-1@", "b-1@", "ab-1@", "@Top", "@Sub", "@Top/", "\u0000000-001-002", "\u0000000-001-002", "\u0000000-001-002"];
+  let nonEmpty = 0;
+  for (let run = 0; run < 3000; run++) {
+    const keys = new Map<string, string>();
+    for (let k = rnd(6); k >= 0; k--) keys.set(`${assemblies[rnd(assemblies.length)]}|${names[rnd(names.length)]}`, `part${rnd(5)}|Default`);
+    let text = "";
+    for (let i = rnd(40); i > 0; i--) text += pieces[rnd(pieces.length)];
+    const bytes = utf16(text, rnd(2));
+    const expected = directoryOrderReference(bytes, keys);
+    if (expected.length) nonEmpty++;
+    assert.deepEqual(directoryOrder(bytes, keys), expected, JSON.stringify([text, [...keys]]));
+  }
+  assert.ok(nonEmpty > 300, `only ${nonEmpty} non-empty orders`);
+});
+
+it("directoryOrder handles thousands of instances quickly", () => {
+  const keys = new Map<string, string>();
+  let text = "";
+  for (let i = 0; i < 20_000; i++) {
+    keys.set(`Top|Part${i}-1`, `C:\\parts\\part${i}.SLDPRT|Default`);
+    text += `\u0000\u0007Part${i}-1@Top\u0000\u0003${String(i % 1000).padStart(3, "0")}-000-001\u0000`;
+  }
+  const t0 = performance.now();
+  const order = directoryOrder(utf16(text), keys);
+  assert.ok(performance.now() - t0 < 1000, "took too long");
+  assert.equal(order.length, 20_000);
+  assert.equal(order[123], "C:\\parts\\part123.SLDPRT|Default");
 });

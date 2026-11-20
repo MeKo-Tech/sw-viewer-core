@@ -2,16 +2,27 @@
 // already parsed result), shows its meshes, and falls back to the embedded
 // thumbnail when the file has no display mesh.
 
-import { type CSSProperties, type HTMLAttributes, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type HTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ColorRepresentation } from "three";
-import { createSwViewer, type SwViewer as SwViewerInstance, type SwViewerOptions } from "../three/viewer.ts";
+import type { SwMeasureItem } from "../geometry/measure.ts";
+import type { SwPinnedMeasurement } from "../three/measure.ts";
+import { formatDimension as defaultFormatDimension, type SwMeasureMode, type SwMeasurement, type SwViewerPick } from "../three/measureModel.ts";
+import type { SwSectionSpec } from "../three/section.ts";
+import { defaultViewCubeLabels, type SwViewCubeColors, type SwViewCubeLabels } from "../three/viewCube.ts";
+import {
+  createSwViewer,
+  type SwColorMode,
+  type SwViewer as SwViewerInstance,
+  type SwViewerOptions,
+} from "../three/viewer.ts";
 import type { SwParseResult } from "../types.ts";
+import { idSetKey, sectionKey } from "./helpers.ts";
 import { type SwSource, useSwParse } from "./useSwParse.ts";
 
 /** Viewer setup, read once on mount. */
 export type SwViewerSetup = Pick<SwViewerOptions, "pixelRatio" | "maxPixelRatio" | "lighting">;
 
-type DivAttributes = Omit<HTMLAttributes<HTMLDivElement>, "onError" | "children" | "className" | "style">;
+type DivAttributes = Omit<HTMLAttributes<HTMLDivElement>, "onError" | "onSelect" | "children" | "className" | "style">;
 
 export interface SwViewerProps extends DivAttributes {
   /** File or bytes to parse. Requires `createWorker`. */
@@ -34,6 +45,30 @@ export interface SwViewerProps extends DivAttributes {
   viewerOptions?: SwViewerSetup;
   /** Show the embedded thumbnail when there is no mesh (default true). */
   preview?: boolean;
+  /** Show the model edges (default true). */
+  edges?: boolean;
+  /** `file` (default): file colours; `part`: one colour per part file. */
+  colorMode?: SwColorMode;
+  /** Section plane, or null/undefined for none. */
+  section?: SwSectionSpec | null;
+  /** Measure pick filter; null/undefined turns measuring off. */
+  measureMode?: SwMeasureMode | null;
+  /**
+   * Hidden component ids (controlled). Without it, the viewer starts with the components
+   * SolidWorks saved as hidden; see `initialHiddenComponents`.
+   */
+  hiddenComponents?: readonly string[];
+  /** Orientation cube in the top-right corner (default false). */
+  viewCube?: boolean;
+  /** Texts on the cube faces (default English). */
+  viewCubeLabels?: SwViewCubeLabels;
+  /** Cube colours; unset ones come from the `--sw-cube-*` custom properties, read when the cube is built. */
+  viewCubeColors?: Partial<SwViewCubeColors>;
+  /** Text of dimension labels (default `formatDimension`); used for dimensions drawn afterwards. */
+  formatDimension?: (item: SwMeasureItem) => string;
+  onMeasure?: (measurement: SwMeasurement | null) => void;
+  onSelect?: (picks: SwViewerPick[]) => void;
+  onPinsChange?: (pins: SwPinnedMeasurement[]) => void;
   className?: string;
   style?: CSSProperties;
   /** Overlay rendered inside the container, e.g. a spinner. */
@@ -45,6 +80,8 @@ const missingWorker = (): Worker => {
 };
 
 const fillStyle: CSSProperties = { position: "absolute", inset: 0 };
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const previewStyle: CSSProperties = {
   position: "absolute",
@@ -68,6 +105,18 @@ export function SwViewer({
   onReady,
   viewerOptions,
   preview = true,
+  edges = true,
+  colorMode = "file",
+  section = null,
+  measureMode = null,
+  hiddenComponents,
+  viewCube = false,
+  viewCubeLabels,
+  viewCubeColors,
+  formatDimension,
+  onMeasure,
+  onSelect,
+  onPinsChange,
   className,
   style,
   children,
@@ -85,11 +134,19 @@ export function SwViewer({
   const onErrorRef = useRef(onError);
   const onFirstFrameRef = useRef(onFirstFrame);
   const onReadyRef = useRef(onReady);
+  const onMeasureRef = useRef(onMeasure);
+  const onSelectRef = useRef(onSelect);
+  const onPinsChangeRef = useRef(onPinsChange);
+  const formatRef = useRef(formatDimension);
   useEffect(() => {
     onResultRef.current = onResult;
     onErrorRef.current = onError;
     onFirstFrameRef.current = onFirstFrame;
     onReadyRef.current = onReady;
+    onMeasureRef.current = onMeasure;
+    onSelectRef.current = onSelect;
+    onPinsChangeRef.current = onPinsChange;
+    formatRef.current = formatDimension;
   });
   const notifiedRef = useRef<unknown>(null);
   useEffect(() => {
@@ -106,6 +163,9 @@ export function SwViewer({
   const backgroundRef = useRef(background);
   backgroundRef.current = background;
   const setupRef = useRef(viewerOptions);
+  // Current state for a (re)created viewer, e.g. after a StrictMode remount.
+  const initialRef = useRef({ edges, colorMode, viewCube, viewCubeLabels, viewCubeColors });
+  initialRef.current = { edges, colorMode, viewCube, viewCubeLabels, viewCubeColors };
   useEffect(() => {
     const host = canvasHostRef.current;
     if (!host) return;
@@ -114,7 +174,12 @@ export function SwViewer({
       viewer = createSwViewer(host, {
         ...setupRef.current,
         background: backgroundRef.current,
+        ...initialRef.current,
         onFirstFrame: () => onFirstFrameRef.current?.(),
+        onMeasure: (m) => onMeasureRef.current?.(m),
+        onSelect: (p) => onSelectRef.current?.(p),
+        onPinsChange: (p) => onPinsChangeRef.current?.(p),
+        formatDimension: (item) => (formatRef.current ?? defaultFormatDimension)(item),
       });
     } catch (err) {
       // No WebGL, or the browser's context limit: report it instead of crashing the tree.
@@ -134,6 +199,42 @@ export function SwViewer({
     viewerRef.current?.setModel(effective);
   }, [effective]);
 
+  // Keyed by content, so inline arrays and objects don't reapply on every render (each
+  // apply drops the hover, prunes picks and recomputes the section contour).
+  const hiddenKey = idSetKey(hiddenComponents);
+  useEffect(() => {
+    if (hiddenComponents) viewerRef.current?.setHiddenComponents(hiddenComponents);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hiddenKey, effective]);
+
+  const sectionSpecKey = sectionKey(section);
+  useEffect(() => {
+    viewerRef.current?.setSection(section);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionSpecKey]);
+
+  useEffect(() => {
+    viewerRef.current?.setMeasureMode(measureMode);
+  }, [measureMode]);
+
+  useEffect(() => {
+    viewerRef.current?.setEdgesVisible(edges);
+  }, [edges]);
+
+  useEffect(() => {
+    viewerRef.current?.setColorMode(colorMode);
+  }, [colorMode]);
+
+  // The initial cube comes from the options; later toggles and label changes go here.
+  const cubeKey = `${viewCube}:${JSON.stringify(viewCubeLabels ?? null)}:${JSON.stringify(viewCubeColors ?? null)}`;
+  const cubeKeyRef = useRef(cubeKey);
+  useEffect(() => {
+    if (cubeKeyRef.current === cubeKey) return;
+    cubeKeyRef.current = cubeKey;
+    viewerRef.current?.setViewCube(viewCube, viewCubeLabels ?? defaultViewCubeLabels, viewCubeColors ?? {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cubeKey]);
+
   useEffect(() => {
     viewerRef.current?.setBackground(background);
   }, [background]);
@@ -151,8 +252,26 @@ export function SwViewer({
     return () => URL.revokeObjectURL(url);
   }, [previewBytes]);
 
+  // The canvas and overlays fill the container, so it must be positioned. Only a
+  // container the app left static is made relative; its own position (inline or from a
+  // class, e.g. absolute) stays.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const forcedRef = useRef(false);
+  const stylePosition = style?.position;
+  useIsoLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (stylePosition) {
+      forcedRef.current = false;
+      return;
+    }
+    if (forcedRef.current) el.style.position = "";
+    forcedRef.current = el.ownerDocument.defaultView?.getComputedStyle(el).position === "static";
+    if (forcedRef.current) el.style.position = "relative";
+  }, [className, stylePosition]);
+
   return (
-    <div {...divProps} className={className} style={{ ...style, position: "relative" }}>
+    <div {...divProps} ref={rootRef} className={className} style={style}>
       <div ref={canvasHostRef} style={fillStyle} />
       {previewUrl && previewBytes ? <img src={previewUrl} alt="" style={previewStyle} /> : null}
       {children}
