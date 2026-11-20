@@ -320,3 +320,38 @@ describe("SolidWorks 2011 parts (OLE2)", { skip: !ole2Truth && "SW_OLE2_FIXTURES
     });
   }
 });
+
+describe("OLE2 container limits", () => {
+  const nested = (depth: number, leaf: Node): Node => {
+    let n = leaf;
+    for (let i = 0; i < depth; i++) n = { name: "S", children: [n] };
+    return n;
+  };
+
+  it("keeps streams 32 storages deep and skips deeper ones quickly", () => {
+    const { bytes } = buildOle([nested(32, { name: "Deep32", data: text("a") }), { name: "Top", data: text("c") }]);
+    assert.deepEqual(openSwContainer(bytes).entries.map((e) => e.name), ["S/".repeat(32) + "Deep32", "Top"]);
+
+    // 10000 storages with 31-character names, each holding a stream and the next
+    // storage: the sibling chain Top, stream, storage, stream, storage, ... is rewired so
+    // every storage's child is the following stream. Without the depth cap each stream
+    // path is built and upper-cased at full length, quadratic in the depth.
+    const n = 10_000;
+    const name = "N".repeat(31);
+    const nodes: Node[] = [{ name: "Top", data: text("c") }];
+    for (let i = 0; i < n; i++) nodes.push({ name: "s" + i, data: text("x") }, { name, children: [] });
+    const flat = buildOle(nodes);
+    // Directory ids: 0 root, 1 Top, then stream 2+2i and storage 3+2i.
+    for (let i = 0; i < n - 1; i++) {
+      const storage = 3 + 2 * i;
+      setU32(flat.bytes, flat.dirOffset(storage) + 0x48, FREE);
+      setU32(flat.bytes, flat.dirOffset(storage) + 0x4c, storage + 1);
+    }
+    const t0 = performance.now();
+    const c = openSwContainer(flat.bytes);
+    assert.ok(performance.now() - t0 < 1000, "took too long");
+    const names = c.entries.map((e) => e.name);
+    assert.equal(names.length, 1 + 33);
+    assert.ok(names.includes("Top") && names.includes("s0") && names.includes(`${name}/`.repeat(32) + "s32"));
+  });
+});

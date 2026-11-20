@@ -19,6 +19,10 @@ const TYPE_STORAGE = 1;
 const TYPE_STREAM = 2;
 const TYPE_ROOT = 5;
 const ZLB_SUFFIX = "__ZLB";
+/** Storages nested deeper than this are skipped (SolidWorks uses two or three levels). */
+const MAX_STORAGE_DEPTH = 32;
+/** Streams listed at most; the rest of a crafted directory is ignored. */
+const MAX_ENTRIES = 100_000;
 
 const fail = (message: string): never => {
   throw new SwContainerError(`OLE2: ${message}`);
@@ -226,20 +230,22 @@ export const openOleContainer = (d: Uint8Array): SwContainer => {
     return readFat(e.start, e.size, `"${name}"`);
   };
 
-  // Walk the red-black trees of every storage; the visited set breaks cycles.
+  // Walk the red-black trees of every storage; the visited set breaks cycles. The depth
+  // and entry caps bound the path strings, which would otherwise grow quadratically
+  // with a crafted chain of nested storages.
   const entries: SwEntry[] = [];
   const visited = new Set<number>();
-  const stack: { id: number; path: string }[] = [{ id: root.child, path: "" }];
-  while (stack.length) {
-    const { id, path } = stack.pop()!;
+  const stack: { id: number; path: string; depth: number }[] = [{ id: root.child, path: "", depth: 0 }];
+  while (stack.length && entries.length < MAX_ENTRIES) {
+    const { id, path, depth } = stack.pop()!;
     if (id >= dirs.length || visited.has(id)) continue;
     visited.add(id);
     const e = dirs[id];
-    stack.push({ id: e.right, path }, { id: e.left, path });
-    const full = path ? `${path}/${e.name}` : e.name;
+    stack.push({ id: e.right, path, depth }, { id: e.left, path, depth });
     if (e.type === TYPE_STORAGE) {
-      stack.push({ id: e.child, path: full });
+      if (depth < MAX_STORAGE_DEPTH) stack.push({ id: e.child, path: path ? `${path}/${e.name}` : e.name, depth: depth + 1 });
     } else if (e.type === TYPE_STREAM) {
+      const full = path ? `${path}/${e.name}` : e.name;
       const zlb = full.toUpperCase().endsWith(ZLB_SUFFIX);
       const name = zlb ? full.slice(0, -ZLB_SUFFIX.length) : full;
       entries.push({
