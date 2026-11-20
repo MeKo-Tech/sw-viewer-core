@@ -5,19 +5,14 @@
 // Ported from Solidworks-File-Decoder/freecad/SldImport/sldcontainer.py (our own code).
 // The pre-2015 OLE2 compound file is read by ole.ts behind the same interface.
 
+import { inflateBounded, MAX_ENTRY_SIZE, SwContainerError } from "./inflate.ts";
 import { openOleContainer } from "./ole.ts";
+
+export { MAX_ENTRY_SIZE, SwContainerError };
 
 /** Version 20, flags 6, method 8 (DEFLATE): marks local and central headers. */
 const MARKER = [0x14, 0x00, 0x06, 0x00, 0x08, 0x00];
 const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
-
-/** Hard cap on an entry's declared uncompressed size, so a crafted file can't make
- *  the inflater allocate gigabytes. Real DisplayLists stay far below this. */
-export const MAX_ENTRY_SIZE = 256 * 1024 * 1024;
-
-export class SwContainerError extends Error {
-  override name = "SwContainerError";
-}
 
 export type SwContainerKind = "zip" | "ole2" | "unknown";
 
@@ -95,47 +90,6 @@ const crc32 = (d: Uint8Array) => {
     c = crcTable[(c ^ d[i]) & 0xff] ^ (c >>> 8);
   }
   return (c ^ 0xffffffff) >>> 0;
-};
-
-/** Inflates `data` (raw DEFLATE or zlib) into at most `limit` bytes. Stops reading and
- *  throws as soon as the output would exceed `limit`, so a DEFLATE bomb never gets
- *  buffered. Returns fewer bytes if the stream ends early; the caller checks that. */
-export const inflateBounded = async (
-  data: Uint8Array,
-  limit: number,
-  name: string,
-  format: "deflate-raw" | "deflate" = "deflate-raw"
-) => {
-  const reader = new Blob([data as BlobPart])
-    .stream()
-    .pipeThrough(new DecompressionStream(format))
-    .getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (total + value.length > limit) {
-      await reader.cancel().catch(() => {});
-      throw new SwContainerError(
-        `entry "${name}" inflates to more than its declared ${limit} bytes`
-      );
-    }
-    chunks.push(value);
-    total += value.length;
-  }
-  if (chunks.length === 1) {
-    return chunks[0];
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.length;
-  }
-  return out;
 };
 
 interface LocalHeader {

@@ -3,11 +3,11 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { previewDibToBmp, readPartBlocks, readReferencedTree, readSheets } from "../src/drawing.ts";
+import { parseComponentTree } from "../src/assemblyTree.ts";
+import { previewDibToBmp, readPartBlocks, readSheets } from "../src/drawing.ts";
 import type { SwContainer } from "../src/container.ts";
 import { parseSwFile } from "../src/parse.ts";
 import { transferables } from "../src/protocol.ts";
-import { parseXml } from "../src/xml.ts";
 import { readFixture, skipUnless } from "./fixtures.ts";
 
 const cstring = (value: string) =>
@@ -97,14 +97,16 @@ describe("drawing streams", () => {
           <swReference swComponentName="p" swReferenceNumber="2" swModelRef="10" swSuppressed="YES" swTransform="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
         </swModel>
       </swModelList></swSolidWorks>`;
-    const { components, leaves } = readReferencedTree(parseXml(xml)!);
-    assert.deepEqual(components.map((c) => [c.id, c.kind, c.hidden, c.suppressed]), [
+    // The drawing reads its xmlstream with the assembly tree parser.
+    const tree = parseComponentTree(xml)!;
+    assert.deepEqual(tree.roots.map((c) => [c.id, c.kind, c.hidden, c.suppressed]), [
       ["sub-1", "assembly", true, false],
       ["p-2", "part", false, true],
     ]);
+    const leaves = tree.leaves.filter((leaf) => !leaf.suppressed);
     assert.equal(leaves.length, 1);
     assert.equal(leaves[0].node.id, "sub-1/p-1");
-    assert.equal(leaves[0].hidden, true);
+    assert.equal(leaves[0].node.hidden, true);
     // Child (1 mm along x) rotated 90° about z by the parent, then moved 2 mm along y.
     const m = leaves[0].matrix;
     assert.deepEqual([m[12], m[13], m[14]].map((x) => Math.round(x * 1e9) / 1e9), [0, 3, 0]);
@@ -119,8 +121,8 @@ describe("drawing streams", () => {
       return `<swModel id="${i}" swFileRef="f">${refs}</swModel>`;
     });
     const xml = `<swSolidWorks><swModelList>${models.join("")}</swModelList></swSolidWorks>`;
-    const { truncated } = readReferencedTree(parseXml(xml)!);
-    assert.equal(truncated, true);
+    const tree = parseComponentTree(xml)!;
+    assert.ok(tree.warnings.some((w) => /cut off/.test(w)));
   });
 });
 
@@ -161,6 +163,15 @@ describe("Baugr3.slddrw", { skip: skipUnless("Baugr3.slddrw") }, () => {
     [...min, ...max].forEach((v, i) => assert.ok(Math.abs(v - expected[i]) < 0.5, `bbox[${i}] = ${v}`));
 
     assert.ok(transferables(r).includes(r.sheets![0].image.buffer as ArrayBuffer));
+  });
+
+  it("names components exactly like the referenced Baugr3.sldasm", { skip: skipUnless("Baugr3.sldasm") }, async () => {
+    const drw = await parseSwFile(readFixture("Baugr3.slddrw"));
+    const asm = await parseSwFile(readFixture("Baugr3.sldasm"));
+    const strip = (nodes: NonNullable<typeof drw.components>): unknown[] =>
+      nodes.map((n) => [n.id, n.kind, n.hidden, n.suppressed, strip(n.children)]);
+    assert.deepEqual(strip(drw.components!), strip(asm.components!));
+    assert.deepEqual(drw.meshes.map((m) => m.componentId), asm.meshes.map((m) => m.componentId));
   });
 
   it("converts the high-resolution Preview into a 2858×1499 BMP", async () => {

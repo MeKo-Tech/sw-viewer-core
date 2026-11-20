@@ -7,22 +7,18 @@
 // - `Contents/VBLists` stores one block of face tables per referenced part, in part
 //   coordinates, each preceded by the part's full path as an MFC Unicode CString.
 // - `swXmlContents/xmlstream-<n>` is the referenced assembly's component tree (same
-//   schema as an assembly's COMPINSTANCETREE) with the placements.
+//   schema as an assembly's COMPINSTANCETREE) with the placements; assemblyTree.ts reads
+//   it, so component ids match those of the assembly file.
 // Layout first worked out in MeKo's CAD-Viewer-Projekt (src/sw.js, parseDrawing); see
 // docs/format.md.
 
+import { fileStem, parseComponentTree, type SwComponentTree } from "./assemblyTree.ts";
 import type { SwContainer } from "./container.ts";
 import { buildBodyMesh, scanFaceTables, type FaceTess } from "./displayMesh.ts";
 import { readMfcUnicodeString } from "./mfc.ts";
 import type { SwComponentNode, SwMesh, SwSheet } from "./types.ts";
-import { findAll, parseXml, type XmlElement } from "./xml.ts";
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
-const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-const M_TO_MM = 1000;
-/** Cap on component nodes, so a crafted tree that references a sub-assembly many times
- *  per level cannot expand exponentially. */
-const MAX_COMPONENTS = 100_000;
 
 export interface SwDrawingContent {
   meshes: SwMesh[];
@@ -97,7 +93,6 @@ export const previewDibToBmp = (raw: Uint8Array): Uint8Array | undefined => {
 };
 
 const normalizePath = (p: string) => p.replaceAll("/", "\\").toLowerCase();
-const stemOf = (p: string) => p.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "");
 
 /** Face tables of `Contents/VBLists`, grouped by the part path preceding each block.
  *  A path that reappears later only references the block already stored. */
@@ -131,127 +126,13 @@ export const readPartBlocks = (bytes: Uint8Array, maxVertices: number) => {
   return { blocks, unassigned, ignoredBlocks: ignored };
 };
 
-/** Column-major 4×4 product a·b. */
-const multiply = (a: number[], b: number[]) => {
-  const out = new Array<number>(16).fill(0);
-  for (let c = 0; c < 4; c++) {
-    for (let r = 0; r < 4; r++) {
-      let s = 0;
-      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-      out[c * 4 + r] = s;
-    }
-  }
-  return out;
-};
-
-/** `swTransform`: 16 numbers that read directly as a column-major 4×4 matrix (rotation
- *  columns with a 0 each, translation in metres, 1), the same layout as the placements
- *  in an assembly's DisplayLists. */
-const parseTransform = (attr: string | undefined) => {
-  const t = (attr ?? "").trim().split(/\s+/).map(Number);
-  if (t.length !== 16 || !t.every(Number.isFinite)) return IDENTITY;
-  const m = t.slice();
-  m[12] *= M_TO_MM;
-  m[13] *= M_TO_MM;
-  m[14] *= M_TO_MM;
-  m[3] = m[7] = m[11] = 0;
-  m[15] = 1;
-  return m;
-};
-
-interface Instance {
-  node: SwComponentNode;
-  matrix: number[];
-  hidden: boolean;
-}
-
-/** Component tree and leaf part placements from the drawing's xmlstream. */
-export const readReferencedTree = (root: XmlElement) => {
-  const files = new Map<string, { path: string; type: string }>();
-  for (const f of findAll(root, "swFile")) {
-    files.set(f.attributes.id, { path: f.attributes.swPath ?? "", type: f.attributes.swDocType ?? "" });
-  }
-  const models = new Map<string, XmlElement>();
-  for (const m of findAll(root, "swModel")) models.set(m.attributes.id, m);
-  const referenced = new Set<string>();
-  for (const m of models.values()) {
-    for (const r of m.children) if (r.localName === "swReference") referenced.add(r.attributes.swModelRef);
-  }
-
-  const leaves: Instance[] = [];
-  const usedIds = new Set<string>();
-  let truncated = false;
-  const uniqueId = (id: string) => {
-    let out = id;
-    for (let n = 2; usedIds.has(out); n++) out = `${id}#${n}`;
-    usedIds.add(out);
-    return out;
-  };
-  const walk = (
-    model: XmlElement,
-    parent: number[],
-    prefix: string,
-    hiddenAbove: boolean,
-    depth: number,
-    ancestors: Set<string>
-  ): SwComponentNode[] => {
-    const nodes: SwComponentNode[] = [];
-    for (const r of model.children) {
-      if (r.localName !== "swReference") continue;
-      if (usedIds.size >= MAX_COMPONENTS) {
-        truncated = true;
-        break;
-      }
-      const a = r.attributes;
-      const sub = models.get(a.swModelRef);
-      const file = files.get(sub?.attributes.swFileRef ?? "");
-      const name = `${a.swComponentName ?? a.swName ?? "?"}-${a.swReferenceNumber ?? "1"}`;
-      const suppressed = a.swSuppressed === "YES";
-      const hidden = hiddenAbove || a.swHidden === "YES";
-      const matrix = multiply(parent, parseTransform(a.swTransform));
-      const isAssembly =
-        file?.type === "ASSEMBLY" || !!sub?.children.some((c) => c.localName === "swReference");
-      const node: SwComponentNode = {
-        id: uniqueId(prefix + name),
-        name,
-        path: file?.path || undefined,
-        configuration: a.swConfigurationName || undefined,
-        kind: isAssembly ? "assembly" : "part",
-        hidden,
-        suppressed,
-        children: [],
-      };
-      nodes.push(node);
-      const key = a.swModelRef;
-      if (isAssembly) {
-        if (sub && !suppressed && depth < 64 && !ancestors.has(key)) {
-          node.children = walk(sub, matrix, `${prefix}${name}/`, hidden, depth + 1, new Set([...ancestors, key]));
-        }
-      } else if (!suppressed) {
-        leaves.push({ node, matrix, hidden });
-      }
-    }
-    return nodes;
-  };
-
-  // Root assemblies: models with references that no other model references. A drawing
-  // of a single part has none; its cached part is then shown at its own origin.
-  const components: SwComponentNode[] = [];
-  for (const [id, m] of models) {
-    if (!referenced.has(id) && m.children.some((c) => c.localName === "swReference")) {
-      components.push(...walk(m, IDENTITY, "", false, 0, new Set([id])));
-    }
-  }
-  return { components, leaves, truncated };
-};
-
 const findPart = (
   meshes: Map<string, SwMesh>,
   byStem: Map<string, SwMesh | null>,
   path: string | undefined
 ) => {
   if (!path) return;
-  return meshes.get(normalizePath(path)) ?? byStem.get(stemOf(path).toLowerCase()) ?? undefined;
+  return meshes.get(normalizePath(path)) ?? byStem.get(fileStem(path).toLowerCase()) ?? undefined;
 };
 
 /** 3D meshes of a drawing: one mesh per placed part instance (shared geometry), plus
@@ -270,30 +151,28 @@ export const readDrawingModel = async (c: SwContainer, maxVertices: number) => {
   for (const [key, block] of blocks) {
     const mesh = buildBodyMesh(block.faces);
     if (!mesh) continue;
-    mesh.name = stemOf(block.path);
+    mesh.name = fileStem(block.path);
     partMeshes.set(key, mesh);
-    const stem = stemOf(block.path).toLowerCase();
+    const stem = fileStem(block.path).toLowerCase();
     byStem.set(stem, byStem.has(stem) ? null : mesh);
   }
 
-  let tree: ReturnType<typeof readReferencedTree> | undefined;
+  // A drawing of a single part has no assembly tree; its cached part is then shown at
+  // its own origin.
+  let tree: SwComponentTree | undefined;
   for (const e of c.entries) {
     if (!/^swXmlContents\/xmlstream/i.test(e.name) || !e.size) continue;
     const xml = await e.read().catch(() => undefined);
-    const root = xml && parseXml(xml);
-    if (root && findAll(root, "swModel").length) {
-      tree = readReferencedTree(root);
-      break;
-    }
+    tree = xml && parseComponentTree(xml);
+    if (tree) break;
   }
 
-  if (tree?.truncated) {
-    warnings.push(`the drawing's component tree was cut off at ${MAX_COMPONENTS} components`);
-  }
+  if (tree) warnings.push(...tree.warnings);
+  const placed = tree?.leaves.filter((leaf) => !leaf.suppressed) ?? [];
   const meshes: SwMesh[] = [];
   const used = new Set<SwMesh>();
   let missing = 0;
-  for (const leaf of tree?.leaves ?? []) {
+  for (const leaf of placed) {
     const base = findPart(partMeshes, byStem, leaf.node.path);
     if (!base) {
       missing++;
@@ -305,21 +184,21 @@ export const readDrawingModel = async (c: SwContainer, maxVertices: number) => {
       name: leaf.node.name,
       matrix: leaf.matrix,
       componentId: leaf.node.id,
-      ...(leaf.hidden ? { visible: false } : {}),
+      ...(leaf.node.hidden ? { visible: false } : {}),
     });
   }
   if (missing) {
-    warnings.push(`drawing model geometry is unavailable for ${missing} of ${tree!.leaves.length} part instances`);
+    warnings.push(`drawing model geometry is unavailable for ${missing} of ${placed.length} part instances`);
   }
   for (const [key, mesh] of partMeshes) {
     if (used.has(mesh)) continue;
-    meshes.push({ ...mesh, componentId: stemOf(blocks.get(key)!.path) });
+    meshes.push({ ...mesh, componentId: fileStem(blocks.get(key)!.path) });
   }
   if (!blocks.size && unassigned.length) {
     const mesh = buildBodyMesh(unassigned);
     if (mesh) meshes.push(mesh);
   }
-  const components = tree?.components.length ? tree.components : undefined;
+  const components = tree?.roots.length ? tree.roots : undefined;
   return { meshes, components, warnings };
 };
 

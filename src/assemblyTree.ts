@@ -1,4 +1,6 @@
-// Component tree of an assembly from `swXmlContents/COMPINSTANCETREE`.
+// Component tree of an assembly from `swXmlContents/COMPINSTANCETREE`. Drawings store
+// the referenced assembly's tree in the same schema (`swXmlContents/xmlstream-<n>`) and
+// read it with the same parser, so a component has the same id in both files.
 // The algorithm (model lookup, transform composition, hidden propagation, no expansion
 // of suppressed sub-assemblies) is ported from MeKo's CAD-Viewer-Projekt (`src/sw.js`,
 // `parseAssembly`). Layout notes: docs/format.md, "Assembly display caches".
@@ -72,7 +74,7 @@ export const transformFromXml = (value: string | undefined): number[] | undefine
   ];
 };
 
-/** Parses the tree; undefined when the stream is not a usable COMPINSTANCETREE. */
+/** Parses the tree; undefined when the stream is not a usable component tree. */
 export const parseComponentTree = (input: Uint8Array | string): SwComponentTree | undefined => {
   let doc: XmlElement | undefined;
   try {

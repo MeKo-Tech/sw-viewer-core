@@ -17,12 +17,14 @@ export { parseSwFile } from "./parse.ts";
 export type { SwParseReply, SwParseRequest } from "./protocol.ts";
 export type {
   Rgb,
+  SwComponentNode,
   SwDocumentKind,
   SwEdgeInfo,
   SwFaceInfo,
   SwMesh,
   SwModelStats,
   SwParseResult,
+  SwSheet,
   Vec3,
 } from "./types.ts";
 export * from "./geometry/index.ts";

@@ -7,13 +7,8 @@
 // Structure follows [MS-CFB]; first ported from the readOle function in MeKo's
 // CAD-Viewer-Projekt (src/sw.js).
 
-import {
-  inflateBounded,
-  MAX_ENTRY_SIZE,
-  SwContainerError,
-  type SwContainer,
-  type SwEntry,
-} from "./container.ts";
+import type { SwContainer, SwEntry } from "./container.ts";
+import { inflateBounded, MAX_ENTRY_SIZE, SwContainerError } from "./inflate.ts";
 
 const HEADER_SIZE = 512;
 const DIR_ENTRY_SIZE = 128;
