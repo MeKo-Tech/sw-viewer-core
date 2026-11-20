@@ -30,7 +30,13 @@ export {
   type SwToolbarLabels,
   type SwViewerPanelLabels,
 } from "./labels.ts";
-export { defaultViewCubeLabels, type SwStandardView, type SwViewCubeLabels } from "../three/viewCube.ts";
+export {
+  defaultViewCubeColors,
+  defaultViewCubeLabels,
+  type SwStandardView,
+  type SwViewCubeColors,
+  type SwViewCubeLabels,
+} from "../three/viewCube.ts";
 export type { SwPinnedMeasurement } from "../three/measure.ts";
 export {
   DEFAULT_UNIT_LABELS,

@@ -52,13 +52,82 @@ const FACE_OF: Record<string, keyof SwViewCubeLabels> = {
 export const VIEW_CUBE_SIZE = 120;
 const MARGIN = 8;
 
-const labelTexture = (text: string) => {
+/** Colours of the orientation cube. */
+export interface SwViewCubeColors {
+  /** The six labelled faces. */
+  face: THREE.ColorRepresentation;
+  /** The twelve edge pieces. */
+  edge: THREE.ColorRepresentation;
+  /** The eight corner pieces. */
+  corner: THREE.ColorRepresentation;
+  /** The piece under the pointer. */
+  hover: THREE.ColorRepresentation;
+  /** Face labels. */
+  text: THREE.ColorRepresentation;
+  /** Outline of the cube. */
+  outline: THREE.ColorRepresentation;
+  /** The x, y and z axes. */
+  axes: [THREE.ColorRepresentation, THREE.ColorRepresentation, THREE.ColorRepresentation];
+}
+
+export const defaultViewCubeColors: Readonly<SwViewCubeColors> = {
+  face: 0xffffff,
+  edge: 0xe4e8ef,
+  corner: 0xd5dbe4,
+  hover: 0x9cc3ff,
+  text: 0x3b4658,
+  outline: 0x9aa6b8,
+  axes: [0xd64545, 0x2f9e44, 0x2f6fd6],
+};
+
+/** CSS custom properties read by `viewCubeColorsFromCss`, per colour. */
+export const VIEW_CUBE_CSS_VARS: Readonly<Record<Exclude<keyof SwViewCubeColors, "axes">, string>> = {
+  face: "--sw-cube-face",
+  edge: "--sw-cube-edge",
+  corner: "--sw-cube-corner",
+  hover: "--sw-cube-hover",
+  text: "--sw-cube-text",
+  outline: "--sw-cube-outline",
+};
+
+/** Any CSS colour the browser understands (oklch, color-mix, …) as `#rrggbb`, or null. */
+const cssColorHex = (doc: Document, value: string): string | null => {
+  const css = doc.defaultView?.CSS;
+  if (css?.supports && !css.supports("color", value)) return null;
+  const cv = doc.createElement("canvas");
+  cv.width = cv.height = 1;
+  const g = cv.getContext("2d", { willReadFrequently: true });
+  if (!g) return null;
+  g.fillStyle = value;
+  g.fillRect(0, 0, 1, 1);
+  const [r, gr, b] = g.getImageData(0, 0, 1, 1).data;
+  return `#${[r, gr, b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+};
+
+/**
+ * Cube colours from the `--sw-cube-*` custom properties (`--sw-cube-face`, `-edge`,
+ * `-corner`, `-hover`, `-text`, `-outline`) as computed on `el`; unset ones are left out.
+ */
+export const viewCubeColorsFromCss = (el: Element): Partial<SwViewCubeColors> => {
+  const doc = el.ownerDocument;
+  const style = doc.defaultView?.getComputedStyle(el);
+  const out: Partial<SwViewCubeColors> = {};
+  if (!style) return out;
+  for (const [key, name] of Object.entries(VIEW_CUBE_CSS_VARS) as [keyof typeof VIEW_CUBE_CSS_VARS, string][]) {
+    const raw = style.getPropertyValue(name).trim();
+    const hex = raw ? cssColorHex(doc, raw) : null;
+    if (hex) out[key] = hex;
+  }
+  return out;
+};
+
+const labelTexture = (text: string, colors: SwViewCubeColors) => {
   const cv = document.createElement("canvas");
   cv.width = cv.height = 256;
   const g = cv.getContext("2d")!;
-  g.fillStyle = "#ffffff";
+  g.fillStyle = `#${new THREE.Color(colors.face).getHexString()}`;
   g.fillRect(0, 0, 256, 256);
-  g.fillStyle = "#3b4658";
+  g.fillStyle = `#${new THREE.Color(colors.text).getHexString()}`;
   const size = text.length > 6 ? 40 : text.length > 5 ? 50 : 60;
   g.font = `700 ${size}px system-ui, "Segoe UI", sans-serif`;
   g.textAlign = "center";
@@ -70,14 +139,19 @@ const labelTexture = (text: string) => {
   return t;
 };
 
+type Piece = THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial[]>;
+
 export class SwViewCube {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-1.15, 1.15, 1.15, -1.15, 0.1, 10);
-  private readonly pieces: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial[]>[] = [];
-  private hovered: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial[]> | null = null;
+  private readonly pieces: Piece[] = [];
+  private hovered: Piece | null = null;
   private readonly raycaster = new THREE.Raycaster();
+  private readonly hoverColor: THREE.Color;
 
-  constructor(labels: SwViewCubeLabels = defaultViewCubeLabels) {
+  constructor(labels: SwViewCubeLabels = defaultViewCubeLabels, colorOverrides: Partial<SwViewCubeColors> = {}) {
+    const colors: SwViewCubeColors = { ...defaultViewCubeColors, ...colorOverrides };
+    this.hoverColor = new THREE.Color(colors.hover);
     this.scene.add(new THREE.AmbientLight(0xffffff, 2.1));
     const light = new THREE.DirectionalLight(0xffffff, 1.1);
     this.camera.add(light);
@@ -96,32 +170,35 @@ export class SwViewCube {
         for (const k of [-1, 0, 1]) {
           if (!i && !j && !k) continue;
           const nz = [i, j, k].filter(Boolean).length;
-          const base = nz === 1 ? 0xffffff : nz === 2 ? 0xe4e8ef : 0xd5dbe4;
+          const base = new THREE.Color(nz === 1 ? colors.face : nz === 2 ? colors.edge : colors.corner);
           const mats = sides.map((sd) => {
             const out = nz === 1 && sd[0] === i && sd[1] === j && sd[2] === k;
-            return new THREE.MeshStandardMaterial({
-              color: base,
+            // The label texture carries the face colour, so its material stays white.
+            const color = out ? new THREE.Color(0xffffff) : base.clone();
+            const mat = new THREE.MeshStandardMaterial({
+              color,
               roughness: 0.9,
               metalness: 0,
-              map: out ? labelTexture(labels[FACE_OF[`${i},${j},${k}`]]) : null,
+              map: out ? labelTexture(labels[FACE_OF[`${i},${j},${k}`]], colors) : null,
             });
+            mat.userData.base = color.clone();
+            return mat;
           });
           const size = [i, j, k].map((v) => (v ? 0.17 : 0.66)) as Vec3;
           const m = new THREE.Mesh(new THREE.BoxGeometry(...size), mats);
           m.position.set(i * 0.415, j * 0.415, k * 0.415);
-          m.userData = { dir: [i, j, k], base };
+          m.userData = { dir: [i, j, k] };
           this.scene.add(m);
           this.pieces.push(m);
         }
     this.scene.add(
-      new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0x9aa6b8 })),
+      new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: colors.outline })),
     );
-    const axisColors = [0xd64545, 0x2f9e44, 0x2f6fd6];
     for (let a = 0; a < 3; a++) {
       const o = new THREE.Vector3(-0.56, -0.56, -0.56);
       const e = o.clone();
       e.setComponent(a, e.getComponent(a) + 1.38);
-      this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([o, e]), new THREE.LineBasicMaterial({ color: axisColors[a] })));
+      this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([o, e]), new THREE.LineBasicMaterial({ color: colors.axes[a] })));
     }
   }
 
@@ -148,16 +225,16 @@ export class SwViewCube {
     const x = (clientX - rect.left - (rect.width - VIEW_CUBE_SIZE - MARGIN)) / VIEW_CUBE_SIZE;
     const y = (clientY - rect.top - MARGIN) / VIEW_CUBE_SIZE;
     this.raycaster.setFromCamera(new THREE.Vector2(x * 2 - 1, -(y * 2 - 1)), this.camera);
-    return (this.raycaster.intersectObjects(this.pieces, false)[0]?.object as (typeof this.pieces)[number] | undefined) ?? null;
+    return (this.raycaster.intersectObjects(this.pieces, false)[0]?.object as Piece | undefined) ?? null;
   }
 
   /** Highlights the piece under the pointer; returns true when the pointer is on a piece. */
   hover(clientX: number, clientY: number, rect: DOMRect) {
     const p = this.pieceAt(clientX, clientY, rect);
     if (p !== this.hovered) {
-      if (this.hovered) for (const m of this.hovered.material) m.color.setHex(this.hovered.userData.base);
+      if (this.hovered) for (const m of this.hovered.material) m.color.copy(m.userData.base);
       this.hovered = p;
-      if (p) for (const m of p.material) m.color.setHex(0x9cc3ff);
+      if (p) for (const m of p.material) m.color.copy(this.hoverColor);
     }
     return !!p;
   }

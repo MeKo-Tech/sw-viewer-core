@@ -2,13 +2,13 @@
 // already parsed result), shows its meshes, and falls back to the embedded
 // thumbnail when the file has no display mesh.
 
-import { type CSSProperties, type HTMLAttributes, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type HTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ColorRepresentation } from "three";
 import type { SwMeasureItem } from "../geometry/measure.ts";
 import type { SwPinnedMeasurement } from "../three/measure.ts";
 import { formatDimension as defaultFormatDimension, type SwMeasureMode, type SwMeasurement, type SwViewerPick } from "../three/measureModel.ts";
 import type { SwSectionSpec } from "../three/section.ts";
-import type { SwViewCubeLabels } from "../three/viewCube.ts";
+import { defaultViewCubeLabels, type SwViewCubeColors, type SwViewCubeLabels } from "../three/viewCube.ts";
 import {
   createSwViewer,
   type SwColorMode,
@@ -62,6 +62,8 @@ export interface SwViewerProps extends DivAttributes {
   viewCube?: boolean;
   /** Texts on the cube faces (default English). */
   viewCubeLabels?: SwViewCubeLabels;
+  /** Cube colours; unset ones come from the `--sw-cube-*` custom properties, read when the cube is built. */
+  viewCubeColors?: Partial<SwViewCubeColors>;
   /** Text of dimension labels (default `formatDimension`); used for dimensions drawn afterwards. */
   formatDimension?: (item: SwMeasureItem) => string;
   onMeasure?: (measurement: SwMeasurement | null) => void;
@@ -78,6 +80,8 @@ const missingWorker = (): Worker => {
 };
 
 const fillStyle: CSSProperties = { position: "absolute", inset: 0 };
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const previewStyle: CSSProperties = {
   position: "absolute",
@@ -108,6 +112,7 @@ export function SwViewer({
   hiddenComponents,
   viewCube = false,
   viewCubeLabels,
+  viewCubeColors,
   formatDimension,
   onMeasure,
   onSelect,
@@ -159,8 +164,8 @@ export function SwViewer({
   backgroundRef.current = background;
   const setupRef = useRef(viewerOptions);
   // Current state for a (re)created viewer, e.g. after a StrictMode remount.
-  const initialRef = useRef({ edges, colorMode, viewCube, viewCubeLabels });
-  initialRef.current = { edges, colorMode, viewCube, viewCubeLabels };
+  const initialRef = useRef({ edges, colorMode, viewCube, viewCubeLabels, viewCubeColors });
+  initialRef.current = { edges, colorMode, viewCube, viewCubeLabels, viewCubeColors };
   useEffect(() => {
     const host = canvasHostRef.current;
     if (!host) return;
@@ -221,12 +226,12 @@ export function SwViewer({
   }, [colorMode]);
 
   // The initial cube comes from the options; later toggles and label changes go here.
-  const cubeKey = `${viewCube}:${JSON.stringify(viewCubeLabels ?? null)}`;
+  const cubeKey = `${viewCube}:${JSON.stringify(viewCubeLabels ?? null)}:${JSON.stringify(viewCubeColors ?? null)}`;
   const cubeKeyRef = useRef(cubeKey);
   useEffect(() => {
     if (cubeKeyRef.current === cubeKey) return;
     cubeKeyRef.current = cubeKey;
-    viewerRef.current?.setViewCube(viewCube, viewCubeLabels);
+    viewerRef.current?.setViewCube(viewCube, viewCubeLabels ?? defaultViewCubeLabels, viewCubeColors ?? {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cubeKey]);
 
@@ -247,8 +252,26 @@ export function SwViewer({
     return () => URL.revokeObjectURL(url);
   }, [previewBytes]);
 
+  // The canvas and overlays fill the container, so it must be positioned. Only a
+  // container the app left static is made relative; its own position (inline or from a
+  // class, e.g. absolute) stays.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const forcedRef = useRef(false);
+  const stylePosition = style?.position;
+  useIsoLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (stylePosition) {
+      forcedRef.current = false;
+      return;
+    }
+    if (forcedRef.current) el.style.position = "";
+    forcedRef.current = el.ownerDocument.defaultView?.getComputedStyle(el).position === "static";
+    if (forcedRef.current) el.style.position = "relative";
+  }, [className, stylePosition]);
+
   return (
-    <div {...divProps} className={className} style={{ ...style, position: "relative" }}>
+    <div {...divProps} ref={rootRef} className={className} style={style}>
       <div ref={canvasHostRef} style={fillStyle} />
       {previewUrl && previewBytes ? <img src={previewUrl} alt="" style={previewStyle} /> : null}
       {children}

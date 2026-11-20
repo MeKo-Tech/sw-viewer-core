@@ -49,11 +49,15 @@ export {
 export { type SwMeasureCallbacks, type SwMeasureHost, SwMeasureTool, type SwPinnedMeasurement } from "./measure.ts";
 export {
   defaultViewCubeLabels,
+  defaultViewCubeColors,
   type SwStandardView,
   SwViewCube,
+  type SwViewCubeColors,
   type SwViewCubeLabels,
+  VIEW_CUBE_CSS_VARS,
   VIEW_CUBE_SIZE,
   VIEW_DIRECTIONS,
+  viewCubeColorsFromCss,
 } from "./viewCube.ts";
 export {
   componentParents,

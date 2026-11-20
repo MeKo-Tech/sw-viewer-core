@@ -13,7 +13,15 @@ import { SwMeasureTool, type SwPinnedMeasurement } from "./measure.ts";
 import { formatDimension as formatDimensionDefault, type SwMeasureMode, type SwMeasurement, type SwViewerPick } from "./measureModel.ts";
 import { applyPartColors, buildSwGroup, disposeObject, fitCamera, setEdgesVisible, swMeshData } from "./scene.ts";
 import { type SwBox, type SwSectionSpec, SwSectionView, sectionFromDescription } from "./section.ts";
-import { defaultViewCubeLabels, type SwStandardView, SwViewCube, type SwViewCubeLabels, VIEW_DIRECTIONS } from "./viewCube.ts";
+import {
+  defaultViewCubeLabels,
+  type SwStandardView,
+  SwViewCube,
+  type SwViewCubeColors,
+  type SwViewCubeLabels,
+  VIEW_DIRECTIONS,
+  viewCubeColorsFromCss,
+} from "./viewCube.ts";
 
 /** `file`: colours as saved in the file; `part`: one palette colour per part file (assemblies). */
 export type SwColorMode = "file" | "part";
@@ -41,6 +49,11 @@ export interface SwViewerOptions {
   viewCube?: boolean;
   /** Texts on the cube faces (default English). */
   viewCubeLabels?: SwViewCubeLabels;
+  /**
+   * Cube colours. Unset ones come from the `--sw-cube-*` custom properties on the
+   * container (read when the cube is created), else the defaults.
+   */
+  viewCubeColors?: Partial<SwViewCubeColors>;
   /** Text of a dimension label (default `formatDimension`, e.g. `Ø20.000`). */
   formatDimension?: (item: SwMeasureItem) => string;
   /** The measurement after every selection change; null when nothing is selected. */
@@ -97,19 +110,20 @@ export interface SwViewer {
   setMeasureFormatter(format: ((item: SwMeasureItem) => string) | null): void;
   /** Turns the camera to a standard view (or a direction from the target to the camera) and fits the model. */
   setView(view: SwStandardView | Vec3, options?: { animate?: boolean; fit?: boolean }): void;
-  setViewCube(visible: boolean, labels?: SwViewCubeLabels): void;
+  /** Shows, hides or rebuilds the cube; omitted labels and colours keep the current ones. */
+  setViewCube(visible: boolean, labels?: SwViewCubeLabels, colors?: Partial<SwViewCubeColors>): void;
   /** Stops rendering, frees all GPU resources and releases the WebGL context. */
   dispose(): void;
 }
 
 const OVERLAY_CSS = `
 :where(.sw-labels){position:absolute;inset:0;pointer-events:none;overflow:hidden}
-:where(.sw-dim){background:#fff;color:#c2410c;border:1px solid #c2410c;border-radius:4px;padding:1px 6px;font:600 12px/1.4 system-ui,sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums}
-:where(.sw-dim-end){width:5px;height:5px;border-radius:50%;background:#d9480f}
-:where(.sw-measure-point){width:8px;height:8px;border-radius:50%;background:#3d8bfd;box-shadow:0 0 0 2px #fff,0 0 0 3px #3d8bfd}
-:where(.sw-measure-point.sw-hover){background:#7fb2ff}
+:where(.sw-dim){background:var(--sw-dim-bg,#fff);color:var(--sw-dim,#c2410c);border:1px solid var(--sw-dim,#c2410c);border-radius:4px;padding:1px 6px;font:600 12px/1.4 system-ui,sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums}
+:where(.sw-dim-end){width:5px;height:5px;border-radius:50%;background:var(--sw-dim,#d9480f)}
+:where(.sw-measure-point){width:8px;height:8px;border-radius:50%;background:var(--sw-pick,#3d8bfd);box-shadow:0 0 0 2px #fff,0 0 0 3px var(--sw-pick,#3d8bfd)}
+:where(.sw-measure-point.sw-hover){opacity:.65}
 :where(.sw-snap){width:0;height:0}
-:where(.sw-snap)::before{content:"";position:absolute;left:-6px;top:-6px;width:12px;height:12px;box-sizing:border-box;border:2px solid #1d5fc9;border-radius:50%}
+:where(.sw-snap)::before{content:"";position:absolute;left:-6px;top:-6px;width:12px;height:12px;box-sizing:border-box;border:2px solid var(--sw-snap,#1d5fc9);border-radius:50%}
 :where(.sw-snap[data-kind=corner])::before{border-radius:0}
 :where(.sw-snap[data-kind=midpoint])::before{border-radius:0;transform:rotate(45deg) scale(.85)}
 `;
@@ -211,7 +225,10 @@ export const createSwViewer = (container: HTMLElement, options: SwViewerOptions 
   );
   if (options.formatDimension) measure.format = options.formatDimension;
 
-  let cube: SwViewCube | null = options.viewCube ? new SwViewCube(options.viewCubeLabels ?? defaultViewCubeLabels) : null;
+  let cubeLabels = options.viewCubeLabels ?? defaultViewCubeLabels;
+  let cubeColors = options.viewCubeColors ?? {};
+  const makeCube = () => new SwViewCube(cubeLabels, { ...viewCubeColorsFromCss(container), ...cubeColors });
+  let cube: SwViewCube | null = options.viewCube ? makeCube() : null;
 
   // ---------- camera animation ----------
   let anim: { from: THREE.Vector3; to: THREE.Vector3; t0: THREE.Vector3; t1: THREE.Vector3; d0: number; d1: number; start: number } | null = null;
@@ -475,9 +492,11 @@ export const createSwViewer = (container: HTMLElement, options: SwViewerOptions 
       measure.refresh();
     },
     setView,
-    setViewCube(visible, labels) {
+    setViewCube(visible, labels, colors) {
       cube?.dispose();
-      cube = visible ? new SwViewCube(labels ?? options.viewCubeLabels ?? defaultViewCubeLabels) : null;
+      if (labels) cubeLabels = labels;
+      if (colors) cubeColors = colors;
+      cube = visible ? makeCube() : null;
     },
     dispose() {
       observer.disconnect();
