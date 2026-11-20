@@ -1,4 +1,4 @@
-// Usage: node tools/inspect.ts <file.SLDPRT> [--stl out.stl] [--png out.png] [--entries]
+// Usage: node tools/inspect.ts <file.SLDPRT> [--stl out.stl] [--png out.png] [--entries] [--props]
 // Prints container entries and mesh statistics; optionally writes a binary STL of the
 // display mesh or the embedded thumbnail, for a quick check in any viewer.
 
@@ -11,7 +11,7 @@ import type { SwMesh } from "../src/types.ts";
 const args = process.argv.slice(2);
 const file = args[0];
 if (!file) {
-  console.error("usage: node tools/inspect.ts <file> [--stl out.stl] [--png out.png] [--entries]");
+  console.error("usage: node tools/inspect.ts <file> [--stl out.stl] [--png out.png] [--entries] [--props]");
   process.exit(2);
 }
 const opt = (name: string) => {
@@ -53,6 +53,15 @@ for (const m of r.meshes) {
     `mesh faces=${m.faceRanges?.length} vertices=${m.positions.length / 3} triangles=${m.indices.length / 3}` +
       ` volume=${signedVolume(m).toFixed(2)}mm3 color=${m.color?.map((c) => Math.round(c * 255)).join(",")}`
   );
+}
+for (const sheet of r.sheets ?? []) {
+  console.log(`sheet "${sheet.name}" ${sheet.image.length}B`);
+}
+if (r.properties) {
+  console.log(`properties: ${Object.keys(r.properties).length}`);
+  if (args.includes("--props")) {
+    for (const [k, v] of Object.entries(r.properties)) console.log(`  ${k} = ${v}`);
+  }
 }
 for (const w of r.warnings) {
   console.log("warning:", w);

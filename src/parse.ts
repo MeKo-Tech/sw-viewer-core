@@ -4,7 +4,9 @@ import {
   type SwContainer,
 } from "./container.ts";
 import { readAssembly } from "./assembly.ts";
+import { readDrawing } from "./drawing.ts";
 import { buildBodyMesh, MAX_VERTICES, scanFaceTables } from "./displayMesh.ts";
+import { readProperties } from "./properties.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
 import { readBodyColor, readFaceColors } from "./visualProps.ts";
 
@@ -16,7 +18,10 @@ const documentKind = (c: SwContainer): SwDocumentKind => {
   if (names.some((n) => /Contents\/Config-\d+-Partition/.test(n))) {
     return "part";
   }
-  if (names.some((n) => /^Contents\/Sheet/i.test(n))) {
+  if (
+    names.some((n) => /^(Contents\/Sheet|Images\/Sheet_|SheetPreviews\/)/i.test(n)) ||
+    (names.includes("Contents/VBLists") && !names.includes("Contents/DisplayLists"))
+  ) {
     return "drawing";
   }
   return "unknown";
@@ -36,6 +41,27 @@ export const parseSwFile = async (
   const warnings: string[] = [];
   const preview = await readOptional(c, "PreviewPNG");
   const version = containerVersion(c);
+  const properties = await readProperties(c);
+
+  if (kind === "drawing") {
+    const drawing = await readDrawing(c, MAX_VERTICES);
+    warnings.push(...drawing.warnings);
+    const previewType = !preview && drawing.previewBmp ? "image/bmp" : undefined;
+    if (!drawing.meshes.length && !drawing.sheets.length) {
+      warnings.push("the drawing contains no sheet image or cached model");
+    }
+    return {
+      kind,
+      version,
+      meshes: drawing.meshes,
+      preview: preview ?? drawing.previewBmp,
+      ...(previewType ? { previewType } : {}),
+      ...(drawing.components ? { components: drawing.components } : {}),
+      sheets: drawing.sheets,
+      properties,
+      warnings,
+    };
+  }
 
   if (kind === "assembly") {
     let meshes: SwParseResult["meshes"] = [];
@@ -55,7 +81,7 @@ export const parseSwFile = async (
         ? "no renderable assembly cache; showing the thumbnail"
         : "no renderable assembly cache or thumbnail");
     }
-    return { kind, version, meshes, ...(components ? { components } : {}), preview, warnings };
+    return { kind, version, meshes, ...(components ? { components } : {}), preview, properties, warnings };
   }
 
   const displayLists = await readOptional(c, "Contents/DisplayLists");
@@ -85,6 +111,7 @@ export const parseSwFile = async (
     version,
     meshes: mesh ? [mesh] : [],
     preview,
+    properties,
     warnings,
   };
 };

@@ -3,7 +3,9 @@
 // The file is a ZIP-like archive behind an 8-byte header: the ZIP signatures are
 // replaced, entry names are nibble-swapped per byte and the payload is raw DEFLATE.
 // Ported from Solidworks-File-Decoder/freecad/SldImport/sldcontainer.py (our own code).
-// The pre-2015 OLE2 container is detected but not read yet.
+// The pre-2015 OLE2 compound file is read by ole.ts behind the same interface.
+
+import { openOleContainer } from "./ole.ts";
 
 /** Version 20, flags 6, method 8 (DEFLATE): marks local and central headers. */
 const MARKER = [0x14, 0x00, 0x06, 0x00, 0x08, 0x00];
@@ -95,31 +97,45 @@ const crc32 = (d: Uint8Array) => {
   return (c ^ 0xffffffff) >>> 0;
 };
 
-/** Inflates raw DEFLATE into a buffer of exactly `size` bytes. Stops reading and
- *  throws as soon as the output would exceed `size`, so a DEFLATE bomb never gets
+/** Inflates `data` (raw DEFLATE or zlib) into at most `limit` bytes. Stops reading and
+ *  throws as soon as the output would exceed `limit`, so a DEFLATE bomb never gets
  *  buffered. Returns fewer bytes if the stream ends early; the caller checks that. */
-const inflateRaw = async (data: Uint8Array, size: number, name: string) => {
+export const inflateBounded = async (
+  data: Uint8Array,
+  limit: number,
+  name: string,
+  format: "deflate-raw" | "deflate" = "deflate-raw"
+) => {
   const reader = new Blob([data as BlobPart])
     .stream()
-    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .pipeThrough(new DecompressionStream(format))
     .getReader();
-  const out = new Uint8Array(size);
+  const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) {
       break;
     }
-    if (total + value.length > size) {
+    if (total + value.length > limit) {
       await reader.cancel().catch(() => {});
       throw new SwContainerError(
-        `entry "${name}" inflates to more than its declared ${size} bytes`
+        `entry "${name}" inflates to more than its declared ${limit} bytes`
       );
     }
-    out.set(value, total);
+    chunks.push(value);
     total += value.length;
   }
-  return total === size ? out : out.subarray(0, total);
+  if (chunks.length === 1) {
+    return chunks[0];
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
 };
 
 interface LocalHeader {
@@ -203,7 +219,7 @@ const toEntry = (d: Uint8Array, lh: LocalHeader): SwEntry => ({
     if (lh.size === 0) {
       return new Uint8Array(0);
     }
-    const raw = await inflateRaw(
+    const raw = await inflateBounded(
       d.subarray(lh.dataStart, lh.dataStart + lh.compressedSize),
       lh.size,
       name
@@ -243,9 +259,7 @@ const scanLocalHeaders = (d: Uint8Array, v: DataView) => {
 export const openSwContainer = (d: Uint8Array): SwContainer => {
   const kind = containerKind(d);
   if (kind === "ole2") {
-    throw new SwContainerError(
-      "SolidWorks files before 2015 (OLE2 container) are not supported yet"
-    );
+    return openOleContainer(d);
   }
   if (kind === "unknown") {
     throw new SwContainerError("not a SolidWorks file");
