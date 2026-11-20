@@ -592,6 +592,39 @@ export interface SwSectionContour {
   info: SwEdgeInfo;
 }
 
+/** Mesh-space bounding box of a positions buffer (NaN skipped), cached per buffer. */
+const boxCache = new WeakMap<Float32Array, Float64Array>();
+const positionsBox = (p: Float32Array) => {
+  let b = boxCache.get(p);
+  if (b) return b;
+  b = new Float64Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
+  for (let i = 0; i + 2 < p.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const x = p[i + k];
+      if (x < b[k]) b[k] = x;
+      if (x > b[k + 3]) b[k + 3] = x;
+    }
+  }
+  boxCache.set(p, b);
+  return b;
+};
+
+/** true when every point of the box lies clearly on one side of `n·x = d`. */
+const boxMissesPlane = (b: Float64Array, n: Vec3, d: number) => {
+  if (!(b[0] <= b[3])) return true; // no finite vertex: nothing to cut
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let c = 0; c < 8; c++) {
+    const s = n[0] * b[c & 1 ? 3 : 0] + n[1] * b[c & 2 ? 4 : 1] + n[2] * b[c & 4 ? 5 : 2] - d;
+    if (s < lo) lo = s;
+    if (s > hi) hi = s;
+  }
+  // Margin for rounding: the per-vertex distances below are computed independently.
+  const scale = Math.abs(d) + Math.abs(n[0]) * Math.max(-b[0], b[3]) + Math.abs(n[1]) * Math.max(-b[1], b[4]) + Math.abs(n[2]) * Math.max(-b[2], b[5]);
+  const tol = 1e-9 * scale + 1e-12;
+  return lo > tol || hi < -tol;
+};
+
 /**
  * Cuts the facets of `mesh` with a plane and chains the cut segments per face. On
  * cylinders (axis parallel or perpendicular to the plane) and spheres the points are
@@ -622,6 +655,11 @@ export const sectionContour = (mesh: SwMesh, plane: SwPlane, matrix: Mat4 | unde
 
   const p = mesh.positions;
   const ix = mesh.indices;
+  // Whole mesh on one side of the plane: nothing to cut.
+  if (boxMissesPlane(positionsBox(p), n, d)) return [];
+  // Signed distance per vertex once (same arithmetic as dot(n, q) - d).
+  const sd = new Float64Array(Math.floor(p.length / 3));
+  for (let v = 0; v < sd.length; v++) sd[v] = n[0] * p[3 * v] + n[1] * p[3 * v + 1] + n[2] * p[3 * v + 2] - d;
   const ranges = mesh.faceRanges ?? [{ start: 0, count: ix.length }];
   const key = (q: Vec3) => `${Math.round(q[0] * 1e4)},${Math.round(q[1] * 1e4)},${Math.round(q[2] * 1e4)}`;
   const out: SwSectionContour[] = [];
@@ -635,6 +673,9 @@ export const sectionContour = (mesh: SwMesh, plane: SwPlane, matrix: Mat4 | unde
   ranges.forEach((r, fi) => {
     const segs: [Vec3, Vec3][] = [];
     for (let t = r.start; t + 2 < r.start + r.count; t += 3) {
+      const s0 = sd[ix[t]], s1 = sd[ix[t + 1]], s2 = sd[ix[t + 2]];
+      // Strictly on one side: no crossing and no vertex on the plane.
+      if ((s0 > 0 && s1 > 0 && s2 > 0) || (s0 < 0 && s1 < 0 && s2 < 0)) continue;
       const P = [0, 1, 2].map((k) => {
         const v = 3 * ix[t + k];
         return [p[v], p[v + 1], p[v + 2]] as Vec3;

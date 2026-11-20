@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import * as THREE from "three";
-import { analyzeMesh, describe as describePick } from "../src/geometry/index.ts";
+import { analyzeMesh, describe as describePick, sectionContour } from "../src/geometry/index.ts";
 import { parseSwFile } from "../src/parse.ts";
 import { buildSwGroup } from "../src/three/scene.ts";
 import {
@@ -129,5 +129,25 @@ describe("SwSectionView", () => {
     const d = describePick({ kind: "edge", mesh: view.contours!, edge: view.contours!.edgeRanges!.indexOf(circles[0]) });
     near(d.items.find((x) => x.kind === "diameter")!.value, 20, 1e-3);
     view.dispose();
+  });
+});
+
+describe("sectionContour culling", () => {
+  it("skips instances away from the plane quickly and keeps the cut ones", () => {
+    const part = cylinder(10, 40, 10_000);
+    const instances = Array.from({ length: 300 }, (_, i) => ({
+      ...part,
+      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 30 * i, 0, 0, 1],
+    }));
+    const plane = { normal: [1, 0, 0] as Vec3, constant: 95 };
+    const t0 = performance.now();
+    const cut = instances.map((m) => sectionContour(m, plane));
+    assert.ok(performance.now() - t0 < 1000, "took too long");
+    // Only the instance at x = 90 (radius 10) is cut: two lines on the side, one per cap.
+    assert.deepEqual(cut.map((c, i) => (c.length ? i : -1)).filter((i) => i >= 0), [3]);
+    assert.equal(cut[3].length, 4);
+    // Same result without the cached box (fresh buffer).
+    const fresh = sectionContour({ ...instances[3], positions: part.positions.slice() }, plane);
+    assert.deepEqual(fresh, cut[3]);
   });
 });
