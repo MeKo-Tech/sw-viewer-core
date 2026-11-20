@@ -53,41 +53,81 @@ export const swMeshData = (o: THREE.Object3D): SwMeshUserData | undefined =>
   (o.userData as Partial<SwMeshUserData>).swMesh ? (o.userData as SwMeshUserData) : undefined;
 
 /**
+ * Lookup keyed by a tuple of identities (typed arrays, range arrays, strings): assembly
+ * instances share the typed arrays of their part, so everything derived from those
+ * arrays alone is built once per part instead of once per instance.
+ */
+class TupleCache<T> {
+  private readonly root = new Map<unknown, unknown>();
+  get(keys: readonly unknown[], build: () => T): T {
+    let level = this.root;
+    for (let i = 0; i < keys.length - 1; i++) {
+      let next = level.get(keys[i]) as Map<unknown, unknown> | undefined;
+      if (!next) level.set(keys[i], (next = new Map()));
+      level = next;
+    }
+    const last = keys[keys.length - 1];
+    if (level.has(last)) return level.get(last) as T;
+    const value = build();
+    level.set(last, value);
+    return value;
+  }
+}
+
+const buildGeometry = (m: SwMesh, baseColor: THREE.Color, vertexColors: boolean) => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
+  // The index must be set first: computeVertexNormals walks it for indexed geometry.
+  g.setIndex(new THREE.BufferAttribute(m.indices, 1));
+  if (m.normals) {
+    g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
+  } else {
+    g.computeVertexNormals();
+  }
+  if (vertexColors && m.faceRanges) {
+    const colors = new Float32Array(m.positions.length);
+    for (let i = 0; i < colors.length; i += 3) {
+      colors[i] = baseColor.r;
+      colors[i + 1] = baseColor.g;
+      colors[i + 2] = baseColor.b;
+    }
+    for (const { start, count, color } of m.faceRanges) {
+      if (!color) continue;
+      for (let i = start; i < start + count; i++) {
+        colors.set(color, 3 * m.indices[i]);
+      }
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  }
+  return g;
+};
+
+/**
  * Builds one three.js mesh per SwMesh. Face-range colors become vertex colors. Each
  * mesh carries its model edges as a `LineSegments` child, starts invisible when the
  * SwMesh says `visible: false`, and keeps its source data in `userData` (`SwMeshUserData`).
+ *
+ * Instances that share their typed arrays (assembly instances of one part) also share
+ * the `BufferGeometry` of the faces and of the edges and the `triFace`/`segEdge`
+ * lookups; each mesh keeps its own material, so colours, highlights and clipping stay
+ * per instance. `disposeObject` frees shared geometries once; don't dispose a single
+ * mesh's geometry while other meshes of the group are still in use.
  */
 export const buildSwGroup = (meshes: SwMesh[], options: SwGroupOptions = {}): THREE.Group => {
   const group = new THREE.Group();
   const edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
   let edgeMaterialUsed = false;
+  const geometries = new TupleCache<THREE.BufferGeometry>();
+  const triFaces = new TupleCache<Int32Array>();
+  const edgeGeometries = new TupleCache<{ geometry: THREE.BufferGeometry; segEdge: Int32Array }>();
   meshes.forEach((m, swIndex) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
-    // The index must be set first: computeVertexNormals walks it for indexed geometry.
-    g.setIndex(new THREE.BufferAttribute(m.indices, 1));
-    if (m.normals) {
-      g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
-    } else {
-      g.computeVertexNormals();
-    }
     const baseColor = m.color ? new THREE.Color(...m.color) : new THREE.Color(DEFAULT_COLOR);
     const vertexColors = m.faceRanges?.some((range) => range.color) ?? false;
-    if (vertexColors && m.faceRanges) {
-      const colors = new Float32Array(m.positions.length);
-      for (let i = 0; i < colors.length; i += 3) {
-        colors[i] = baseColor.r;
-        colors[i + 1] = baseColor.g;
-        colors[i + 2] = baseColor.b;
-      }
-      for (const { start, count, color } of m.faceRanges) {
-        if (!color) continue;
-        for (let i = start; i < start + count; i++) {
-          colors.set(color, 3 * m.indices[i]);
-        }
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    }
+    // The colour attribute bakes in the base colour; without it the colour lives in the material.
+    const colorKey = vertexColors ? `${baseColor.r},${baseColor.g},${baseColor.b}` : "";
+    const g = geometries.get([m.positions, m.indices, m.normals, vertexColors ? m.faceRanges : undefined, colorKey], () =>
+      buildGeometry(m, baseColor, vertexColors),
+    );
     const material = new THREE.MeshPhongMaterial({
       color: vertexColors ? 0xffffff : baseColor,
       vertexColors,
@@ -106,15 +146,20 @@ export const buildSwGroup = (meshes: SwMesh[], options: SwGroupOptions = {}): TH
       mesh.matrixWorldNeedsUpdate = true;
     }
     if (m.visible === false) mesh.visible = false;
-    const data: SwMeshUserData = { swIndex, swMesh: m, triFace: triangleFaces(m) };
+    const triFace = triFaces.get([m.indices, m.faceRanges], () => triangleFaces(m));
+    const data: SwMeshUserData = { swIndex, swMesh: m, triFace };
     if (m.componentId !== undefined) data.componentId = m.componentId;
-    if ((options.edges ?? true) && m.edges?.length) {
-      const eg = new THREE.BufferGeometry();
-      eg.setAttribute("position", new THREE.BufferAttribute(m.edges, 3));
-      const lines = new THREE.LineSegments(eg, edgeMaterial);
+    const edges = m.edges;
+    if ((options.edges ?? true) && edges?.length) {
+      const shared = edgeGeometries.get([edges, m.edgeRanges], () => {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(edges, 3));
+        return { geometry, segEdge: segmentEdges(m) };
+      });
+      const lines = new THREE.LineSegments(shared.geometry, edgeMaterial);
       edgeMaterialUsed = true;
       lines.name = "edges";
-      const edgeData: SwEdgeUserData = { swEdges: true, segEdge: segmentEdges(m) };
+      const edgeData: SwEdgeUserData = { swEdges: true, segEdge: shared.segEdge };
       lines.userData = edgeData;
       mesh.add(lines);
       data.edgeLines = lines;

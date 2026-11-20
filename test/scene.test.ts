@@ -304,3 +304,79 @@ test("disposeObject also frees line geometries and shared materials once", () =>
   assert.equal(disposed.size, 7);
   for (const n of disposed.values()) assert.equal(n, 1);
 });
+
+// ---------- instances sharing typed arrays ----------
+
+const instancesOf = (src: SwMesh, n: number): SwMesh[] =>
+  Array.from({ length: n }, (_, i) => ({
+    ...src,
+    name: `P-${i + 1}`,
+    componentId: `P-${i + 1}`,
+    matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 20 * i, 0, 0, 1],
+  }));
+
+test("instances sharing typed arrays share geometries and lookups, not materials", () => {
+  const src = analyzedCube();
+  src.faceRanges![0].color = [1, 0, 0];
+  const group = buildSwGroup([...instancesOf(src, 3), analyzedCube()]);
+  const [a, b, c, other] = meshes(group);
+  assert.equal(a.geometry, b.geometry);
+  assert.equal(a.geometry, c.geometry);
+  assert.notEqual(a.geometry, other.geometry);
+  assert.ok(a.geometry.getAttribute("color"), "vertex colours are kept");
+  assert.notEqual(a.material, b.material);
+  const da = swMeshData(a)!;
+  const db = swMeshData(b)!;
+  assert.equal(da.triFace, db.triFace);
+  assert.equal(da.edgeLines!.geometry, db.edgeLines!.geometry);
+  assert.equal((da.edgeLines!.userData as { segEdge: Int32Array }).segEdge, (db.edgeLines!.userData as { segEdge: Int32Array }).segEdge);
+  assert.notEqual(da.edgeLines, db.edgeLines);
+  // Per-instance state stays per instance.
+  assert.deepEqual([da.componentId, db.componentId], ["P-1", "P-2"]);
+  assert.notDeepEqual(a.matrix.elements, b.matrix.elements);
+});
+
+test("a different base colour gets its own vertex colour geometry", () => {
+  const src = quad({ faceRanges: [{ start: 0, count: 3, color: [0, 1, 0] }, { start: 3, count: 3 }] });
+  const [a, b, c] = meshes(buildSwGroup([src, { ...src, color: [1, 0, 0] }, { ...src }]));
+  assert.notEqual(a.geometry, b.geometry);
+  assert.equal(a.geometry, c.geometry);
+  assertRgbClose(rgbAt(b.geometry.getAttribute("color") as THREE.BufferAttribute, 3), [1, 0, 0]);
+  // Without vertex colours the colour lives in the material, so the geometry is shared.
+  const plain = quad();
+  const [p, q] = meshes(buildSwGroup([plain, { ...plain, color: [1, 0, 0] }]));
+  assert.equal(p.geometry, q.geometry);
+  assert.equal(q.material.color.getHex(), 0xff0000);
+});
+
+test("applyPartColors still colours shared-geometry instances one by one", () => {
+  const src = analyzedCube();
+  src.faceRanges![0].color = [1, 0, 0];
+  const group = buildSwGroup(instancesOf(src, 2));
+  const [a, b] = meshes(group);
+  applyPartColors(group, new Map([["P-1", [0, 0, 1]]]));
+  assert.equal(a.material.vertexColors, false);
+  assert.equal(a.material.color.getHexString(), "0000ff");
+  assert.equal(b.material.vertexColors, true);
+  applyPartColors(group, null);
+  assert.equal(a.material.vertexColors, true);
+});
+
+test("disposeObject frees geometries shared by instances exactly once", () => {
+  const group = buildSwGroup(instancesOf(analyzedCube(), 5));
+  const disposed = new Map<unknown, number>();
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+      for (const x of [o.geometry, o.material]) {
+        if (!disposed.has(x)) {
+          disposed.set(x, 0);
+          x.addEventListener("dispose", () => disposed.set(x, disposed.get(x)! + 1));
+        }
+      }
+    }
+  });
+  disposeObject(group);
+  // 1 mesh geometry + 5 materials + 1 edge geometry + 1 edge material.
+  assert.equal(disposed.size, 8);
+  for (const n of disposed.values()) assert.equal(n, 1);
+});
