@@ -2,13 +2,18 @@
 // already parsed result), shows its meshes, and falls back to the embedded
 // thumbnail when the file has no display mesh.
 
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type HTMLAttributes, type ReactNode, useEffect, useRef, useState } from "react";
 import type { ColorRepresentation } from "three";
-import { createSwViewer, type SwViewer as SwViewerInstance } from "../three/viewer.ts";
+import { createSwViewer, type SwViewer as SwViewerInstance, type SwViewerOptions } from "../three/viewer.ts";
 import type { SwParseResult } from "../types.ts";
 import { type SwSource, useSwParse } from "./useSwParse.ts";
 
-export interface SwViewerProps {
+/** Viewer setup, read once on mount. */
+export type SwViewerSetup = Pick<SwViewerOptions, "pixelRatio" | "maxPixelRatio" | "lighting">;
+
+type DivAttributes = Omit<HTMLAttributes<HTMLDivElement>, "onError" | "children" | "className" | "style">;
+
+export interface SwViewerProps extends DivAttributes {
   /** File or bytes to parse. Requires `createWorker`. */
   source?: SwSource | null;
   /** Worker factory, e.g. `() => new Worker(new URL("…/worker.js", import.meta.url), { type: "module" })`. */
@@ -19,7 +24,16 @@ export interface SwViewerProps {
   /** Clear color, default white. */
   background?: ColorRepresentation;
   onResult?: (result: SwParseResult) => void;
+  /** Parse errors, and WebGL errors when the viewer cannot be created. */
   onError?: (error: Error) => void;
+  /** Called after the first frame with a new model was drawn, e.g. to hide an overlay. */
+  onFirstFrame?: () => void;
+  /** The viewer instance after mount (null on unmount), e.g. for `resetView()`. */
+  onReady?: (viewer: SwViewerInstance | null) => void;
+  /** Pixel ratio and lighting; changes after mount are ignored. */
+  viewerOptions?: SwViewerSetup;
+  /** Show the embedded thumbnail when there is no mesh (default true). */
+  preview?: boolean;
   className?: string;
   style?: CSSProperties;
   /** Overlay rendered inside the container, e.g. a spinner. */
@@ -50,9 +64,14 @@ export function SwViewer({
   background = 0xffffff,
   onResult,
   onError,
+  onFirstFrame,
+  onReady,
+  viewerOptions,
+  preview = true,
   className,
   style,
   children,
+  ...divProps
 }: SwViewerProps) {
   if (source && !createWorker) {
     throw new Error("SwViewer: createWorker is required when source is set");
@@ -64,9 +83,13 @@ export function SwViewer({
   // Callbacks through refs, so inline functions neither retrigger effects nor fire twice.
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
+  const onFirstFrameRef = useRef(onFirstFrame);
+  const onReadyRef = useRef(onReady);
   useEffect(() => {
     onResultRef.current = onResult;
     onErrorRef.current = onError;
+    onFirstFrameRef.current = onFirstFrame;
+    onReadyRef.current = onReady;
   });
   const notifiedRef = useRef<unknown>(null);
   useEffect(() => {
@@ -82,13 +105,27 @@ export function SwViewer({
   const viewerRef = useRef<SwViewerInstance | null>(null);
   const backgroundRef = useRef(background);
   backgroundRef.current = background;
+  const setupRef = useRef(viewerOptions);
   useEffect(() => {
     const host = canvasHostRef.current;
     if (!host) return;
-    const viewer = createSwViewer(host, { background: backgroundRef.current });
+    let viewer: SwViewerInstance;
+    try {
+      viewer = createSwViewer(host, {
+        ...setupRef.current,
+        background: backgroundRef.current,
+        onFirstFrame: () => onFirstFrameRef.current?.(),
+      });
+    } catch (err) {
+      // No WebGL, or the browser's context limit: report it instead of crashing the tree.
+      onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
     viewerRef.current = viewer;
+    onReadyRef.current?.(viewer);
     return () => {
       viewerRef.current = null;
+      onReadyRef.current?.(null);
       viewer.dispose();
     };
   }, []);
@@ -102,7 +139,7 @@ export function SwViewer({
   }, [background]);
 
   // Thumbnail fallback for results without display meshes.
-  const previewBytes = effective && !effective.meshes.length ? effective.preview : undefined;
+  const previewBytes = preview && effective && !effective.meshes.length ? effective.preview : undefined;
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!previewBytes?.length) {
@@ -115,7 +152,7 @@ export function SwViewer({
   }, [previewBytes]);
 
   return (
-    <div className={className} style={{ ...style, position: "relative" }}>
+    <div {...divProps} className={className} style={{ ...style, position: "relative" }}>
       <div ref={canvasHostRef} style={fillStyle} />
       {previewUrl && previewBytes ? <img src={previewUrl} alt="" style={previewStyle} /> : null}
       {children}

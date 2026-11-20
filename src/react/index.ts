@@ -1,4 +1,5 @@
-export { SwViewer, type SwViewerProps } from "./SwViewer.tsx";
+export { SwViewer, type SwViewerProps, type SwViewerSetup } from "./SwViewer.tsx";
+export type { SwViewer as SwViewerInstance } from "../three/viewer.ts";
 export {
   type SwParseState,
   type SwSource,

@@ -56,6 +56,17 @@ import { SwViewer } from "./vendor/sw-viewer-core/react/index.js";
 </SwViewer>
 ```
 
+More props:
+- `onFirstFrame`: hide a loading overlay after the first frame.
+- `onReady(viewer)`: get the instance, e.g. for `viewer.resetView()`.
+- `viewerOptions={{ maxPixelRatio: 2, lighting: "fixed" | "headlight" }}`: read once on mount.
+- `preview={false}`: render your own thumbnail card instead of the built-in one.
+- Any div attribute, such as `role`, `aria-label` or `data-testid`, goes to the container.
+
+If the viewer cannot get a WebGL context, `onError` receives the error and the
+tree keeps rendering. On unmount, the component releases its WebGL context right
+away.
+
 Pass `result` instead of `source` when you have already parsed the file. Use
 `useSwParse(source, createWorker)` for the parse state without the viewer. The
 component has no built-in texts, so the app owns all UI strings. Without React,
