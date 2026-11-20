@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseSwInWorker, SwParseTimeoutError } from "../src/client.ts";
-import type { SwParseReply } from "../src/protocol.ts";
+import { transferables, type SwParseReply } from "../src/protocol.ts";
+import type { SwParseResult } from "../src/types.ts";
 
 class FakeWorker {
   onmessage: ((ev: MessageEvent<SwParseReply>) => void) | null = null;
@@ -58,4 +59,21 @@ test("aborts and terminates", async () => {
   ac.abort(new Error("closed"));
   await assert.rejects(p, /closed/);
   assert.ok(w.terminated);
+});
+
+test("transfers shared geometry for repeated assembly instances", () => {
+  const geometry = {
+    positions: Float32Array.of(1, 2, 3),
+    normals: Float32Array.of(0, 0, 1),
+    indices: Uint32Array.of(0),
+  };
+  const result: SwParseResult = {
+    kind: "assembly",
+    meshes: [{ ...geometry, name: "Part-1" }, { ...geometry, name: "Part-2" }],
+    warnings: [],
+  };
+
+  const received = structuredClone(result, { transfer: transferables(result) });
+  assert.equal(received.meshes[0].positions.buffer, received.meshes[1].positions.buffer);
+  assert.deepEqual(received.meshes[1].positions, Float32Array.of(1, 2, 3));
 });

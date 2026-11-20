@@ -1,13 +1,15 @@
 # sw-viewer-core
 
-Decodes the display mesh and the thumbnail of SolidWorks parts (`.SLDPRT`) in the
-browser. It's pure TypeScript with no WASM, runs in a Web Worker and needs no
-geometry kernel. The worker bundle is about 6 kB.
+Decodes embedded display meshes and thumbnails from SolidWorks parts (`.SLDPRT`)
+and assemblies (`.SLDASM`) in the browser. It runs in a Web Worker and uses pure
+TypeScript with no WASM or geometry kernel.
 
-SolidWorks stores the triangles it last displayed in `Contents/DisplayLists`. This
-library unpacks the container, reads those triangles and returns meshes in the same
-shape the STEP viewers in moin-bridge and moin-deck already render. The format is
-described in [docs/format.md](docs/format.md).
+SolidWorks caches display triangles in the file. The library returns meshes in
+the same shape the STEP viewers in moin-bridge and moin-deck render. For parts,
+face ranges can carry a solid-color override. For assemblies, each rendered
+instance has its saved placement and shares geometry where the cache permits it.
+If an assembly lacks usable geometry, the result includes a warning and the
+embedded thumbnail when present. [Format and fixture coverage](docs/format.md)
 
 ## Usage
 
@@ -16,6 +18,7 @@ import { parseSwFile } from "@meko-tech/sw-viewer-core";
 
 const r = await parseSwFile(new Uint8Array(buffer));
 // r.meshes[0]: { positions (mm), normals, indices, color?, faceRanges }
+// Each face range can have color. Assembly instances have name and matrix.
 // r.preview:   PNG bytes (fallback when r.meshes is empty)
 // r.warnings
 ```
@@ -55,7 +58,7 @@ Uses Node 24, which runs the `.ts` files directly.
 npm install --no-bin-links           # --no-bin-links: the NTFS mount refuses chmod
 SW_DECODER_REPO=../Solidworks-File-Decoder npm test
 npm run typecheck
-npm run demo                         # http://localhost:5173, drop a .SLDPRT
+npm run demo                         # http://localhost:5173, drop a .SLDPRT or .SLDASM
 node tools/inspect.ts part.SLDPRT --entries --stl out.stl --png thumb.png
 ```
 

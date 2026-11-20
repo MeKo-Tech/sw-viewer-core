@@ -3,9 +3,10 @@ import {
   openSwContainer,
   type SwContainer,
 } from "./container.ts";
+import { readAssemblyMeshes } from "./assembly.ts";
 import { buildBodyMesh, scanFaceTables } from "./displayMesh.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
-import { readBodyColor } from "./visualProps.ts";
+import { readBodyColor, readFaceColors } from "./visualProps.ts";
 
 /** Hard cap on decoded vertices so a crafted file can't exhaust memory. */
 const MAX_VERTICES = 8_000_000;
@@ -37,6 +38,28 @@ export const parseSwFile = async (
   const kind = documentKind(c);
   const warnings: string[] = [];
   const preview = await readOptional(c, "PreviewPNG");
+  const version = containerVersion(c);
+
+  if (kind === "assembly") {
+    let meshes: SwParseResult["meshes"] = [];
+    try {
+      const displayLists = await readOptional(c, "Contents/DisplayLists");
+      if (displayLists) {
+        const assembly = await readAssemblyMeshes(c, displayLists, MAX_VERTICES);
+        meshes = assembly.meshes;
+        warnings.push(...assembly.warnings);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`could not read the assembly display cache: ${message}`);
+    }
+    if (!meshes.length) {
+      warnings.push(preview
+        ? "no renderable assembly cache; showing the thumbnail"
+        : "no renderable assembly cache or thumbnail");
+    }
+    return { kind, version, meshes, preview, warnings };
+  }
 
   const displayLists = await readOptional(c, "Contents/DisplayLists");
   const faces = displayLists ? scanFaceTables(displayLists) : [];
@@ -47,20 +70,25 @@ export const parseSwFile = async (
   const mesh = buildBodyMesh(faces);
   if (!mesh) {
     warnings.push(
-      kind === "assembly"
-        ? "assemblies are not rendered yet; showing the thumbnail"
-        : "the file contains no display mesh (e.g. an imported part); showing the thumbnail"
+      preview
+        ? "the file contains no display mesh; showing the thumbnail"
+        : "the file contains no display mesh or thumbnail"
     );
   } else {
     const color =
       readBodyColor((await readOptional(c, "ThirdPtyStore/VisualStates")) ?? new Uint8Array()) ??
       (displayLists ? readBodyColor(displayLists) : undefined);
     mesh.color = color;
+    if (displayLists && mesh.faceRanges) {
+      for (const [index, faceColor] of readFaceColors(displayLists, faces, version)) {
+        mesh.faceRanges[index].color = faceColor;
+      }
+    }
   }
 
   return {
     kind,
-    version: containerVersion(c),
+    version,
     meshes: mesh ? [mesh] : [],
     preview,
     warnings,

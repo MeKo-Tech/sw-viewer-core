@@ -1,9 +1,10 @@
 # SolidWorks display mesh: format notes
 
-This repo reads only what a viewer needs. All facts below come from hex inspection
-of the sample parts in `MeKo-Tech/Solidworks-File-Decoder/testdaten` (SW versions
-15000–19000). They were checked by comparing the enclosed mesh volume with the
-volume SolidWorks reports. No code was taken from third-party decoders.
+The viewer reads SolidWorks display geometry and thumbnails. The original part
+format notes come from inspecting `MeKo-Tech/Solidworks-File-Decoder/testdaten`
+and comparing the mesh volume with the SolidWorks reference. The audit below
+lists the additional parts and assemblies inspected. The parser uses first-party
+format research and code.
 
 ## Container (SolidWorks 2015 and later)
 
@@ -37,6 +38,7 @@ detected and rejected for now.
 | Entry | Use |
 | --- | --- |
 | `Contents/DisplayLists` | tessellated display mesh (below) |
+| `FaceTessellations/Directory` and `FaceTessellations/<name>` | component placements use `DisplayLists`, mesh groups can be stored in separate streams |
 | `PreviewPNG` | PNG thumbnail, the fallback when there is no mesh |
 | `ThirdPtyStore/VisualStates` | part color (first `moVisualProperties_c`, then a COLORREF `R G B 00`); textured appearances give no color, see open points |
 | `_MO_VERSION_<n>/…` | file version from the entry name |
@@ -72,15 +74,60 @@ on the samples. Each strip of length `L` gives `L − 2` triangles. Triangle `i`
 strip is `(i, i+1, i+2)` for even `i` and `(i+1, i, i+2)` for odd `i`. The result is
 wound outward: the signed volume is positive.
 
-## Validation (28 sample parts)
+## Compatibility audit
 
-- 26 of 28 parts match the SolidWorks volume within 1.2 %, most within 0.4 %.
-  Tessellation cuts a little off curved faces.
-- `Sr220106_10RevB` (+99.5 %) and `Sr220106_15RevB` (+7.8 %) carry a **stale** display
-  mesh: the mesh is consistent in itself, but older than the exact solid. The decoder
-  repo found the same thing independently (`docs/TESTERGEBNISSE.md`).
-  - A viewer shows what SolidWorks last displayed. That can differ from the current
-    exact solid when the file was saved without a rebuild.
+The audit covered 92 parts. All 67 modern parts returned a mesh and a PNG
+thumbnail. The 25 OLE2 parts returned the unsupported-format error. The sibling
+repo's Python reader found `PreviewPNG` and `Contents/DisplayLists__ZLB` in all
+25 legacy files.
+
+| Parts | 15000 | 17000 | 19000 | 4700 (OLE2) |
+| --- | ---: | ---: | ---: | ---: |
+| `Solidworks-File-Decoder/testdaten` | 13 | 0 | 15 | 0 |
+| [Mechanical Gear Drive](https://github.com/zyadkhalafamen/mechanical-gear-drive-solidworks/tree/main/solidworks-files) | 9 | 0 | 0 | 0 |
+| [Mechanical Clamp](https://github.com/hrishiraj12/solidworks-mechanical-clamp) | 0 | 6 | 0 | 0 |
+| [Controlled SolidWorks 2011 and 2022 parts](https://github.com/blussyya/sldprt-research-dump/tree/a03a5b3515463d23496536b8a5dc82dce536c1e9/test%20files%20new) | 24 | 0 | 0 | 25 |
+
+The 1,184 archive streams in the 28 reference parts matched the sibling repo's
+Python container reader in order, name, uncompressed size, and SHA-256. Signed
+mesh volume was within the 1.5% test tolerance in 26 of those parts. The largest
+deviation within tolerance was 1.14%. The two known stale meshes,
+`Sr220106_10RevB` and `Sr220106_15RevB`, were 99.52% and 7.75% over the reference
+volumes. The sibling repo's shape comparison also found differences in four
+parts whose volumes pass (`docs/TESTERGEBNISSE.md` in that repo).
+
+All 24 controlled 2022 files matched their measured face counts, and mesh volume
+differed by at most 0.531%. The Gear Drive and Clamp parts have no reference
+volumes in this audit. The imported part `Schiene` had a mesh. The sibling repo's
+105-part project corpus was unavailable, so the audit still lacks a part saved
+without a display mesh. [Controlled part measurements](https://github.com/blussyya/sldprt-research-dump/blob/a03a5b3515463d23496536b8a5dc82dce536c1e9/test%20files%20new/build_results.json)
+
+## Assembly display caches
+
+- Both Gear Drive assemblies have triangles in `Contents/DisplayLists`. The
+  triangles use part-local coordinates. `uoTempAssemblySHDData_c` records carry
+  the instance name and saved transform, including composed transforms for nested
+  components. Repeated instances can reference a previously stored mesh.
+- Mechanical Clamp has placements in `Contents/DisplayLists` and triangles in
+  `FaceTessellations/000-000-005`. The directory stream associates seven named
+  instances with the cache and identifies each component's face run. The cache
+  includes the geometry for a part file missing from the public checkout.
+- Across the three assemblies, the 55 inspected placement records match the
+  transforms in `swXmlContents/COMPINSTANCETREE` after composing parent placements.
+  The viewer renders 23, 24, and 7 leaf instances from the three files. The
+  embedded cache is the source of placements and geometry. Hidden and suppressed
+  instances were outside this validation set.
+
+## Face colors
+
+Part meshes include a `color` on a face range when an inline record between
+matching face IDs describes a local solid-color appearance. The scope field
+distinguishes local overrides from inherited body records. An appearance can use
+a texture even when the first name is empty, so the reader checks both texture
+flags. Texture, ambiguity, and unsupported record layouts leave the range without
+a color override. The demo renders those ranges using the mesh color or default
+grey. Synthetic tests cover solid-color overrides. The verified overrides in the
+real sample parts were textured.
 
 ## Open points
 
@@ -90,10 +137,7 @@ wound outward: the signed volume is positive.
   - A textured appearance (non-empty name, e.g. `texture`) stores white or a nominal base
     color that SolidWorks does not display, so it is reported as no color and the viewer
     uses its default grey. That affects 6 of 28 samples.
-  - Per-face and per-feature colors (`VisualStates`) are not read.
-- **Parts without a mesh** (imported parts) fall back to the thumbnail. No such sample
-  is in `testdaten/`. The 40 project parts mentioned in the decoder repo are needed
-  to test this.
-- **Assemblies.** It's unknown whether `.SLDASM` files carry their own display mesh.
-  There are no samples on this machine.
-- **The OLE2 container** (SW ≤ 2014).
+  - Feature colors and textures remain open.
+- **Parts without a mesh** fall back to the thumbnail when present. This path
+  still needs verification with a real part fixture.
+- **The OLE2 container** (SW ≤ 2014) is detected and rejected.

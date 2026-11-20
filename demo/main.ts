@@ -1,4 +1,4 @@
-// Demo: drop a .SLDPRT, parse it in the worker, render it with three.js. The scene
+// Demo: drop a SolidWorks file, parse it in the worker, render it with three.js. The scene
 // setup mirrors moin-bridge's StepViewer/stepScene so the integration stays close.
 
 import * as THREE from "three";
@@ -57,8 +57,30 @@ const buildGroup = (meshes: SwMesh[]) => {
       g.computeVertexNormals();
     }
     g.setIndex(new THREE.BufferAttribute(m.indices, 1));
-    const color = m.color ? new THREE.Color(...m.color) : new THREE.Color(0xcccccc);
-    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color, specular: 0, side: THREE.DoubleSide }));
+    const baseColor = m.color ? new THREE.Color(...m.color) : new THREE.Color(0xcccccc);
+    const vertexColors = m.faceRanges?.some((range) => range.color) ?? false;
+    if (vertexColors && m.faceRanges) {
+      const colors = new Float32Array(m.positions.length);
+      for (let i = 0; i < colors.length; i += 3) {
+        colors[i] = baseColor.r;
+        colors[i + 1] = baseColor.g;
+        colors[i + 2] = baseColor.b;
+      }
+      for (const { start, count, color } of m.faceRanges) {
+        if (!color) continue;
+        for (let i = start; i < start + count; i++) {
+          colors.set(color, 3 * m.indices[i]);
+        }
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    }
+    const material = new THREE.MeshPhongMaterial({
+      color: vertexColors ? 0xffffff : baseColor,
+      vertexColors,
+      specular: 0,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(g, material);
     if (m.matrix) {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.fromArray(m.matrix);
@@ -126,11 +148,17 @@ const show = async (file: File) => {
       model = buildGroup(r.meshes);
       scene.add(model);
       fitCamera(model);
-      const m = r.meshes[0];
-      info.textContent =
-        `${file.name} · ${r.kind} · v${r.version} · ${m.faceRanges?.length} Flächen · ` +
-        `${(m.indices.length / 3).toLocaleString("de")} Dreiecke · ` +
-        `V ≈ ${signedVolume(m).toLocaleString("de", { maximumFractionDigits: 1 })} mm³ · ${ms.toFixed(0)} ms`;
+      const summary = `${file.name} · ${r.kind} · v${r.version}`;
+      if (r.kind === "assembly") {
+        const triangles = r.meshes.reduce((sum, m) => sum + m.indices.length / 3, 0);
+        info.textContent = `${summary} · ${r.meshes.length} Komponenten · ` +
+          `${triangles.toLocaleString("de")} Dreiecke · ${ms.toFixed(0)} ms`;
+      } else {
+        const m = r.meshes[0];
+        info.textContent = `${summary} · ${m.faceRanges?.length} Flächen · ` +
+          `${(m.indices.length / 3).toLocaleString("de")} Dreiecke · ` +
+          `V ≈ ${signedVolume(m).toLocaleString("de", { maximumFractionDigits: 1 })} mm³ · ${ms.toFixed(0)} ms`;
+      }
     } else if (r.preview) {
       previewImg.src = URL.createObjectURL(new Blob([r.preview as BlobPart], { type: "image/png" }));
       previewImg.style.display = "block";

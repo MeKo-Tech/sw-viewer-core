@@ -11,8 +11,8 @@ export interface SwMesh {
   name?: string;
   /** Column-major 4×4 transform (assembly components). */
   matrix?: number[];
-  /** Index range per SolidWorks face, in `indices`. */
-  faceRanges?: { start: number; count: number }[];
+  /** Index range per SolidWorks face, in `indices`, with an optional 0..1 RGB override. */
+  faceRanges?: { start: number; count: number; color?: Rgb }[];
 }
 
 export type SwDocumentKind = "part" | "assembly" | "drawing" | "unknown";

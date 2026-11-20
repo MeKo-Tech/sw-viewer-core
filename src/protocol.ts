@@ -12,18 +12,18 @@ export type SwParseReply =
   | { type: "done"; result: SwParseResult }
   | { type: "error"; error: string };
 
-/** Buffers of a result, to pass as the transfer list instead of copying them. */
+/** Transfer each buffer once, including geometry shared by assembly instances. */
 export const transferables = (r: SwParseResult): ArrayBuffer[] => {
-  const out: ArrayBuffer[] = [];
+  const out = new Set<ArrayBuffer>();
   for (const m of r.meshes) {
     for (const a of [m.positions, m.normals, m.indices]) {
       if (a) {
-        out.push(a.buffer as ArrayBuffer);
+        out.add(a.buffer as ArrayBuffer);
       }
     }
   }
   if (r.preview) {
-    out.push(r.preview.buffer as ArrayBuffer);
+    out.add(r.preview.buffer as ArrayBuffer);
   }
-  return out;
+  return [...out];
 };

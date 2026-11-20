@@ -2,7 +2,7 @@
   "name": "@meko-tech/sw-viewer-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Decodes the display mesh and thumbnail of SolidWorks files (.SLDPRT) in the browser",
+  "description": "Decodes embedded display meshes and thumbnails from SolidWorks parts and assemblies in the browser",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
