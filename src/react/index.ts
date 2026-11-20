@@ -22,6 +22,7 @@ export {
   defaultToolbarLabels,
   defaultViewerPanelLabels,
   mergeLabels,
+  sheetName,
   type SwComponentTreeLabels,
   type SwInfoPanelLabels,
   type SwMeasurePanelLabels,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SwSheet } from "../types.ts";
 import { cx } from "./helpers.ts";
-import { type DeepPartial, defaultSheetsLabels, mergeLabels, type SwSheetsLabels } from "./labels.ts";
+import { type DeepPartial, defaultSheetsLabels, mergeLabels, sheetName, type SwSheetsLabels } from "./labels.ts";
 
 /** Object URLs for the sheet PNGs, revoked when the sheets change or on unmount. */
 export const useSheetUrls = (sheets: readonly SwSheet[] | undefined): string[] => {
@@ -60,7 +60,7 @@ export function SwSheets({ sheets, selected, onSelect, hasModel = true, urls: gi
         {sheets.map((s, i) => (
           <button key={i} type="button" className="sw-sheet-thumb" aria-pressed={selected === i} onClick={() => onSelect(i)}>
             {urls[i] ? <img src={urls[i]} alt="" /> : null}
-            <span className="sw-sheet-name">{L.sheet(s.name, i)}</span>
+            <span className="sw-sheet-name">{sheetName(L, s.name, i)}</span>
           </button>
         ))}
       </div>

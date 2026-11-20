@@ -13,6 +13,10 @@ export const modelSize = (stats: Pick<SwModelStats, "bboxMin" | "bboxMax">): [nu
 /** Mass in g from a volume in mm³ and a density in g/cm³. */
 export const massGrams = (volumeMm3: number, densityGPerCm3: number) => (volumeMm3 / 1000) * densityGPerCm3;
 
+/** A decimal number for an input field, with the locale's decimal separator and no grouping. */
+export const formatDecimal = (x: number, locale?: string, maximumFractionDigits = 6) =>
+  x.toLocaleString(locale ?? "en-US", { maximumFractionDigits, useGrouping: false });
+
 /** Parses a density typed with a decimal point or comma; NaN when it is no number. */
 export const parseDecimal = (text: string) => {
   const t = text.trim().replace(",", ".");

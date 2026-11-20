@@ -26,6 +26,11 @@ export interface SwComponentTreeProps {
    * 200); smaller trees start fully expanded. Either way each one can be toggled.
    */
   collapseAbove?: number;
+  /**
+   * Show each component's saved file path as a tooltip (default false). The path is
+   * the author's local path, e.g. `C:\Users\…`, which most apps should not show.
+   */
+  showPaths?: boolean;
   className?: string;
 }
 
@@ -41,6 +46,7 @@ export function SwComponentTree({
   labels: partial,
   header = true,
   collapseAbove = DEFAULT_COLLAPSE_ABOVE,
+  showPaths = false,
   className,
 }: SwComponentTreeProps) {
   const L = mergeLabels(defaultComponentTreeLabels, partial);
@@ -61,8 +67,6 @@ export function SwComponentTree({
     if (!ids.delete(id)) ids.add(id);
     setToggledState({ components, ids });
   };
-  const expandLabel = L.expand ?? defaultComponentTreeLabels.expand!;
-  const collapseLabel = L.collapse ?? defaultComponentTreeLabels.collapse!;
 
   const renderNodes = (nodes: readonly SwComponentNode[], depth: number) => (
     <ul className="sw-tree-list" role={depth ? "group" : undefined}>
@@ -77,11 +81,11 @@ export function SwComponentTree({
                 type="button"
                 className="sw-tree-toggle"
                 aria-expanded={open}
-                aria-label={open ? collapseLabel(n.name) : expandLabel(n.name)}
+                aria-label={open ? L.collapse(n.name) : L.expand(n.name)}
                 onClick={() => toggleOpen(n.id)}
               />
             ) : null}
-            <label className="sw-tree-row" title={n.path}>
+            <label className="sw-tree-row" title={showPaths ? n.path : undefined}>
               <input
                 type="checkbox"
                 checked={visible && !n.suppressed}

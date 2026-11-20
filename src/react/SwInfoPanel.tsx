@@ -4,7 +4,7 @@
 import { useId, useState } from "react";
 import { formatNumber } from "../three/measureModel.ts";
 import type { SwFaceInfo, SwParseResult } from "../types.ts";
-import { cx, faceTypeCounts, massGrams, modelSize, parseDecimal, propertyRows } from "./helpers.ts";
+import { cx, faceTypeCounts, formatDecimal, massGrams, modelSize, parseDecimal, propertyRows } from "./helpers.ts";
 import { type DeepPartial, defaultInfoPanelLabels, mergeLabels, type SwInfoPanelLabels } from "./labels.ts";
 
 const FACE_TYPES: SwFaceInfo["type"][] = ["plane", "cylinder", "cone", "sphere", "other"];
@@ -57,10 +57,10 @@ export function SwInfoPanel({
   rows.push([L.kind, L.kinds[result.kind]]);
   if (stats) {
     const s = modelSize(stats);
-    rows.push([L.size, `${s.map((x) => nf(x, 2)).join(" × ")} mm`]);
+    rows.push([L.size, `${s.map((x) => nf(x, 2)).join(" × ")} ${L.units.length}`]);
     if (result.meshes.length) {
-      rows.push([L.volume, `${nf(stats.volume / 1000, 2)} cm³`]);
-      rows.push([L.area, `${nf(stats.area / 100, 2)} cm²`]);
+      rows.push([L.volume, `${nf(stats.volume / 1000, 2)} ${L.units.volume}`]);
+      rows.push([L.area, `${nf(stats.area / 100, 2)} ${L.units.area}`]);
     }
   }
   if (totalFaces) {
@@ -94,7 +94,7 @@ export function SwInfoPanel({
                   id={`${id}-density`}
                   className="sw-input sw-input-number"
                   inputMode="decimal"
-                  value={text ?? String(rho)}
+                  value={text ?? formatDecimal(rho, locale)}
                   onChange={(e) => {
                     setText(e.target.value);
                     const v = parseDecimal(e.target.value);
@@ -105,12 +105,12 @@ export function SwInfoPanel({
                   }}
                   onBlur={() => setText(null)}
                 />{" "}
-                {L.densityUnit}
+                {L.units.density}
               </dd>
             </div>
             <div className="sw-kv-row">
               <dt>{L.mass}</dt>
-              <dd>{nf(massGrams(stats.volume, rho), 1)} g</dd>
+              <dd>{`${nf(massGrams(stats.volume, rho), 1)} ${L.units.mass}`}</dd>
             </div>
           </>
         ) : null}

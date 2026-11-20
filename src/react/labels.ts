@@ -41,6 +41,8 @@ export interface SwToolbarLabels {
   viewNames: Record<SwStandardView, string>;
   resetView: string;
   colorByPart: string;
+  /** Units after the section slider values. */
+  units: { length: string; angle: string };
 }
 
 export const defaultToolbarLabels: SwToolbarLabels = {
@@ -74,6 +76,7 @@ export const defaultToolbarLabels: SwToolbarLabels = {
   viewNames: { front: "Front", back: "Back", top: "Top", bottom: "Bottom", left: "Left", right: "Right", iso: "Isometric" },
   resetView: "Fit",
   colorByPart: "Colour by part",
+  units: { length: "mm", angle: "°" },
 };
 
 export interface SwComponentTreeLabels {
@@ -85,9 +88,9 @@ export interface SwComponentTreeLabels {
   toggle: (name: string) => string;
   showAll: string;
   /** aria-label of the button that opens a collapsed sub-assembly. */
-  expand?: (name: string) => string;
+  expand: (name: string) => string;
   /** aria-label of the button that collapses an open sub-assembly. */
-  collapse?: (name: string) => string;
+  collapse: (name: string) => string;
 }
 
 export const defaultComponentTreeLabels: SwComponentTreeLabels = {
@@ -110,7 +113,6 @@ export interface SwInfoPanelLabels {
   volume: string;
   area: string;
   density: string;
-  densityUnit: string;
   mass: string;
   faces: string;
   faceTypes: Record<SwFaceInfo["type"], string>;
@@ -118,6 +120,8 @@ export interface SwInfoPanelLabels {
   properties: string;
   /** Footnote on approximate values. */
   approxNote: string;
+  /** Units: size in `length`, surface area in `area`, volume, mass, density. */
+  units: { length: string; area: string; volume: string; mass: string; density: string };
 }
 
 export const defaultInfoPanelLabels: SwInfoPanelLabels = {
@@ -129,13 +133,13 @@ export const defaultInfoPanelLabels: SwInfoPanelLabels = {
   volume: "Volume ≈",
   area: "Surface area ≈",
   density: "Density",
-  densityUnit: "g/cm³",
   mass: "Mass ≈",
   faces: "Faces",
   faceTypes: { plane: "planes", cylinder: "cylinders", cone: "cones", sphere: "spheres", other: "freeform" },
   version: "File version",
   properties: "Properties",
   approxNote: "Values with ≈ come from the display mesh.",
+  units: { length: "mm", area: "cm²", volume: "cm³", mass: "g", density: "g/cm³" },
 };
 
 export interface SwMeasurePanelLabels {
@@ -186,27 +190,36 @@ export const defaultMeasurePanelLabels: SwMeasurePanelLabels = {
 export interface SwSheetsLabels {
   title: string;
   model: string;
-  /** Accessible name of a sheet button. */
-  sheet: (name: string, index: number) => string;
+  /** Name of a sheet saved without one, by its 1-based number. */
+  sheetFallback: (n: number) => string;
 }
 
 export const defaultSheetsLabels: SwSheetsLabels = {
   title: "Sheets",
   model: "3D model",
-  sheet: (name, index) => name || `Sheet ${index + 1}`,
+  sheetFallback: (n) => `Sheet ${n}`,
 };
 
+/** Display name of the sheet at `index`: its saved name, or `sheetFallback(index + 1)`. */
+export const sheetName = (labels: Pick<SwSheetsLabels, "sheetFallback">, name: string | undefined, index: number) =>
+  name?.trim() ? name : labels.sheetFallback(index + 1);
+
+/**
+ * Every text of `SwViewerPanel`. The prop takes a `DeepPartial` of it; an app that
+ * builds a complete `SwViewerPanelLabels` gets a type error for every text a newer
+ * version adds, instead of English on screen.
+ */
 export interface SwViewerPanelLabels {
-  toolbar: Partial<SwToolbarLabels>;
-  tree: Partial<SwComponentTreeLabels>;
-  info: Partial<SwInfoPanelLabels>;
-  measure: Partial<SwMeasurePanelLabels>;
-  sheets: Partial<SwSheetsLabels>;
-  viewCube: Partial<SwViewCubeLabels>;
-  /** Overlay while parsing. */
-  loading: string;
-  /** Overlay when parsing failed. */
-  error: (error: Error) => string;
+  toolbar: SwToolbarLabels;
+  tree: SwComponentTreeLabels;
+  info: SwInfoPanelLabels;
+  measure: SwMeasurePanelLabels;
+  sheets: SwSheetsLabels;
+  viewCube: SwViewCubeLabels;
+  /** Status while parsing `source`; never shown when the app passes `result`. */
+  loading?: string;
+  /** Status when parsing `source` failed; never shown when the app passes `result`. */
+  error?: (error: Error) => string;
   /** Shown when the file has neither mesh nor thumbnail. */
   empty: string;
 }

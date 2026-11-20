@@ -177,7 +177,7 @@ export function SwToolbar({
                     value={offset}
                     onChange={(e) => setSection({ offset: Number(e.target.value) })}
                   />
-                  <output>{offset.toLocaleString(locale, { maximumFractionDigits: 2 })} mm</output>
+                  <output>{`${offset.toLocaleString(locale, { maximumFractionDigits: 2 })} ${L.units.length}`}</output>
                 </label>
                 {section.kind === "cylinder" ? (
                   <label className="sw-field">
@@ -190,7 +190,7 @@ export function SwToolbar({
                       value={section.angle ?? 0}
                       onChange={(e) => setSection({ angle: Number(e.target.value) })}
                     />
-                    <output>{section.angle ?? 0}°</output>
+                    <output>{`${(section.angle ?? 0).toLocaleString(locale)}${L.units.angle}`}</output>
                   </label>
                 ) : null}
                 <div className="sw-group">

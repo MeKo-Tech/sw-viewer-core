@@ -9,7 +9,6 @@ import { initialHiddenComponents } from "../three/components.ts";
 import type { SwPinnedMeasurement } from "../three/measure.ts";
 import { formatDimension as formatDimensionDefault, type SwMeasureMode, type SwMeasurement } from "../three/measureModel.ts";
 import type { SwBox, SwSectionSpec } from "../three/section.ts";
-import { defaultViewCubeLabels } from "../three/viewCube.ts";
 import type { SwColorMode, SwViewer as SwViewerInstance } from "../three/viewer.ts";
 import type { SwParseResult } from "../types.ts";
 import { cx } from "./helpers.ts";
@@ -17,6 +16,7 @@ import {
   type DeepPartial,
   defaultViewerPanelLabels,
   mergeLabels,
+  sheetName,
   type SwViewerPanelLabels,
 } from "./labels.ts";
 import { SwComponentTree } from "./SwComponentTree.tsx";
@@ -155,7 +155,7 @@ export function SwViewerPanel({
 
   const hasModel = !!result?.meshes.length;
   const status =
-    parse.status === "parsing" ? L.loading : parse.status === "error" ? L.error(parse.error) : result && !hasModel && !result.preview && !result.sheets?.length ? L.empty : null;
+    parse.status === "parsing" ? (L.loading ?? null) : parse.status === "error" ? (L.error?.(parse.error) ?? parse.error.message) : result && !hasModel && !result.preview && !result.sheets?.length ? L.empty : null;
 
   return (
     <div className={cx("sw-panel", className)} style={style}>
@@ -191,7 +191,7 @@ export function SwViewerPanel({
             measureMode={measureMode}
             hiddenComponents={hidden}
             viewCube={viewCube}
-            viewCubeLabels={{ ...defaultViewCubeLabels, ...L.viewCube }}
+            viewCubeLabels={L.viewCube}
             formatDimension={formatDimension ?? ((item) => formatDimensionDefault(item, { locale }))}
             onMeasure={(m) => {
               setMeasurement(m);
@@ -206,7 +206,7 @@ export function SwViewerPanel({
           />
           {sheet !== null && sheetUrls[sheet] ? (
             <div className="sw-sheet-view">
-              <img src={sheetUrls[sheet]} alt={L.sheets.sheet?.(result?.sheets?.[sheet]?.name ?? "", sheet) ?? ""} />
+              <img src={sheetUrls[sheet]} alt={sheetName(L.sheets, result?.sheets?.[sheet]?.name, sheet)} />
             </div>
           ) : null}
           {status ? (

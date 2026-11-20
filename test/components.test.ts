@@ -12,8 +12,8 @@ import {
   rgbCss,
   setComponentHidden,
 } from "../src/three/components.ts";
-import { countComponents, faceTypeCounts, idSetKey, massGrams, modelSize, parseDecimal, propertyRows, sectionKey, sliderStep } from "../src/react/helpers.ts";
-import { defaultMeasurePanelLabels, defaultToolbarLabels, mergeLabels } from "../src/react/labels.ts";
+import { countComponents, faceTypeCounts, formatDecimal, idSetKey, massGrams, modelSize, parseDecimal, propertyRows, sectionKey, sliderStep } from "../src/react/helpers.ts";
+import { defaultMeasurePanelLabels, defaultSheetsLabels, defaultToolbarLabels, mergeLabels, sheetName } from "../src/react/labels.ts";
 import type { SwComponentNode } from "../src/types.ts";
 
 const node = (id: string, name: string, extra: Partial<SwComponentNode> = {}): SwComponentNode => ({
@@ -97,6 +97,21 @@ describe("React labels and helpers", () => {
     assert.deepEqual(propertyRows({ b: "2", a: "1", empty: " " }), [["a", "1"], ["b", "2"]]);
     assert.equal(sliderStep(0, 2000), 1);
     assert.equal(sliderStep(1, 1), 0.01);
+  });
+
+  it("shows decimals with the locale's separator and parses either", () => {
+    assert.equal(formatDecimal(7.85, "de-DE"), "7,85");
+    assert.equal(formatDecimal(7.85), "7.85");
+    assert.equal(formatDecimal(12345.5, "de-DE"), "12345,5");
+    assert.equal(parseDecimal(formatDecimal(2.7, "de-DE")), 2.7);
+    assert.equal(parseDecimal(" 2.7 "), 2.7);
+  });
+
+  it("names sheets by their saved name or the numbered fallback", () => {
+    assert.equal(sheetName(defaultSheetsLabels, "Blatt1", 0), "Blatt1");
+    assert.equal(sheetName(defaultSheetsLabels, "", 1), "Sheet 2");
+    assert.equal(sheetName(defaultSheetsLabels, "  ", 0), "Sheet 1");
+    assert.equal(sheetName({ sheetFallback: (n) => `Blatt ${n}` }, undefined, 2), "Blatt 3");
   });
 });
 
