@@ -242,3 +242,46 @@ describe("analyzeResult", () => {
     near(r.stats!.area, 6e4, 1e-6);
   });
 });
+
+describe("computeStats on many instances", () => {
+  /** The former per-vertex loop, as the reference for the box. */
+  const referenceBox = (meshes: SwMesh[]) => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (const mesh of meshes) {
+      const p = mesh.positions;
+      const seen = new Uint8Array(p.length / 3);
+      for (const v of mesh.indices) {
+        if (seen[v]) continue;
+        seen[v] = 1;
+        const w = transformPoint(mesh.matrix, [p[3 * v], p[3 * v + 1], p[3 * v + 2]]);
+        for (let k = 0; k < 3; k++) {
+          if (w[k] < lo[k]) lo[k] = w[k];
+          if (w[k] > hi[k]) hi[k] = w[k];
+        }
+      }
+    }
+    return { lo, hi };
+  };
+
+  it("gives the bit-identical box of the per-vertex transform, shared buffers or not", () => {
+    const part = cube(7.3);
+    // An unused vertex far away must not count.
+    const positions = new Float32Array([...part.positions, 1e6, 1e6, 1e6]);
+    const src: SwMesh = { ...part, positions };
+    const meshes: SwMesh[] = [];
+    for (let i = 0; i < 50; i++) {
+      const a = i * 0.731, b = i * 0.177;
+      const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
+      // Rotation about z then x, plus an odd translation.
+      const matrix = [ca, sa * cb, sa * sb, 0, -sa, ca * cb, ca * sb, 0, 0, -sb, cb, 0, i * 3.17, -i * 1.3, i * 0.01, 1];
+      meshes.push({ ...src, matrix }, { ...src, positions: positions.slice(), matrix });
+    }
+    meshes.push({ ...src });
+    const stats = computeStats(meshes)!;
+    const ref = referenceBox(meshes);
+    assert.deepEqual(stats.bboxMin, ref.lo);
+    assert.deepEqual(stats.bboxMax, ref.hi);
+    assert.ok(stats.bboxMax[0] < 1e5);
+  });
+});

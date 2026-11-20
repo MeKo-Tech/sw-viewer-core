@@ -463,11 +463,22 @@ export const analyzeMesh = (mesh: SwMesh): void => {
         l.push(s);
       }
     }
+    // First possibly unused position in each vertex's list; segments only ever become
+    // used, so the cursor never has to move back (a linear scan per vertex in total).
+    const cursor = new Map<number, number>();
+    const nextUnused = (v: number) => {
+      const l = adj.get(v);
+      if (!l) return undefined;
+      let i = cursor.get(v) ?? 0;
+      while (i < l.length && used[l[i]]) i++;
+      cursor.set(v, i);
+      return i < l.length ? l[i] : undefined;
+    };
     const walk = (start: number) => {
       const chain = [start];
       let cur = start;
       for (;;) {
-        const s = adj.get(cur)?.find((x) => !used[x]);
+        const s = nextUnused(cur);
         if (s === undefined) break;
         used[s] = 1;
         cur = segA[s] === cur ? segB[s] : segA[s];
@@ -480,7 +491,7 @@ export const analyzeMesh = (mesh: SwMesh): void => {
     // Open ends first, so open chains are not cut in the middle.
     for (const [v, l] of adj) {
       if (l.length === 2) continue;
-      while (adj.get(v)!.some((x) => !used[x])) chains.push(walk(v));
+      while (nextUnused(v) !== undefined) chains.push(walk(v));
     }
     for (const s of segs) if (!used[s]) chains.push(walk(segA[s]));
 
@@ -564,6 +575,26 @@ export const massProperties = (mesh: Pick<SwMesh, "positions" | "indices" | "nor
   return { volume: Math.abs(vol / 6), area: area2 / 2 };
 };
 
+/** Vertices referenced by `indices`, in first-use order, out-of-range indices dropped. */
+const usedVertices = (cache: Map<Float32Array, Map<Uint32Array, Uint32Array>>, p: Float32Array, indices: Uint32Array) => {
+  let byIndex = cache.get(p);
+  if (!byIndex) cache.set(p, (byIndex = new Map()));
+  let out = byIndex.get(indices);
+  if (out) return out;
+  const nv = Math.floor(p.length / 3);
+  const seen = new Uint8Array(nv);
+  const list: number[] = [];
+  for (let i = 0; i < indices.length; i++) {
+    const v = indices[i];
+    if (v >= nv || seen[v]) continue;
+    seen[v] = 1;
+    list.push(v);
+  }
+  out = Uint32Array.from(list);
+  byIndex.set(indices, out);
+  return out;
+};
+
 /**
  * Bounding box, volume and area of all meshes in world space (via `matrix`). Every
  * mesh counts, hidden instances included, since they are part of the model the
@@ -582,6 +613,7 @@ export const computeStats = (meshes: SwMesh[]): SwModelStats | undefined => {
   };
   let volume = 0;
   let area = 0;
+  const usedCache = new Map<Float32Array, Map<Uint32Array, Uint32Array>>();
   for (const mesh of meshes) {
     let mp = mass.get(mesh.positions);
     if (!mp) mass.set(mesh.positions, (mp = massProperties(mesh)));
@@ -590,13 +622,32 @@ export const computeStats = (meshes: SwMesh[]): SwModelStats | undefined => {
     volume += mp.volume * (m ? Math.abs(det3(m)) : 1);
     area += mp.area * s * s;
     const p = mesh.positions;
-    // Only vertices that triangles use.
-    const seen = new Uint8Array(p.length / 3);
-    for (const v of mesh.indices) {
-      if (seen[v]) continue;
-      seen[v] = 1;
-      const w = transformPoint(m, [p[3 * v], p[3 * v + 1], p[3 * v + 2]]);
-      for (let k = 0; k < 3; k++) grow(k, w[k], w[k]);
+    // Only vertices that triangles use; the list is shared by instances of one part.
+    const used = usedVertices(usedCache, p, mesh.indices);
+    if (m) {
+      const m0 = m[0], m1 = m[1], m2 = m[2], m4 = m[4], m5 = m[5], m6 = m[6];
+      const m8 = m[8], m9 = m[9], m10 = m[10], m12 = m[12], m13 = m[13], m14 = m[14];
+      let x0 = lo[0], y0 = lo[1], z0 = lo[2], x1 = hi[0], y1 = hi[1], z1 = hi[2];
+      for (let i = 0; i < used.length; i++) {
+        const o = 3 * used[i];
+        const x = p[o], y = p[o + 1], z = p[o + 2];
+        // Same operation order as transformPoint, so the box is bit-identical.
+        const wx = m0 * x + m4 * y + m8 * z + m12;
+        const wy = m1 * x + m5 * y + m9 * z + m13;
+        const wz = m2 * x + m6 * y + m10 * z + m14;
+        if (wx < x0) x0 = wx;
+        if (wx > x1) x1 = wx;
+        if (wy < y0) y0 = wy;
+        if (wy > y1) y1 = wy;
+        if (wz < z0) z0 = wz;
+        if (wz > z1) z1 = wz;
+      }
+      lo[0] = x0; lo[1] = y0; lo[2] = z0; hi[0] = x1; hi[1] = y1; hi[2] = z1;
+    } else {
+      for (let i = 0; i < used.length; i++) {
+        const o = 3 * used[i];
+        for (let k = 0; k < 3; k++) grow(k, p[o + k], p[o + k]);
+      }
     }
     for (const f of mesh.faces ?? []) {
       if (f.type !== "cylinder" || !f.full || f.inner) continue;
