@@ -1,0 +1,27 @@
+{
+  "name": "@meko-tech/sw-viewer-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Decodes the display mesh and thumbnail of SolidWorks files (.SLDPRT) in the browser",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "inspect": "node tools/inspect.ts",
+    "demo": "node node_modules/vite/bin/vite.js demo",
+    "build:demo": "node node_modules/vite/bin/vite.js build demo --outDir ../dist/demo --emptyOutDir",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
+    "sync": "node tools/sync.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/three": "^0.187.0",
+    "three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
