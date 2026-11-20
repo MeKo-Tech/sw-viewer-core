@@ -49,6 +49,7 @@ for (const f of readdirSync(lib, { recursive: true }) as string[]) {
   if (statSync(join(lib, f)).isFile()) copy(join(lib, f), join(stage, "lib", f));
 }
 copy(join(root, "README.md"), join(stage, "README.md"));
+copy(join(root, "LICENSE"), join(stage, "LICENSE"));
 const entry = (name: string) => ({ types: `./lib/${name}.d.ts`, default: `./lib/${name}.js` });
 const { devDependencies, scripts, private: _private, ...rest } = pkg;
 writeFileSync(

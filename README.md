@@ -78,7 +78,7 @@ Each release attaches the npm package to its GitHub Release. Apps depend on that
 file, so installing needs no registry and no token:
 
 ```json
-"@meko-tech/sw-viewer-core": "https://github.com/MeKo-Tech/sw-viewer-core/releases/download/v0.2.0/meko-tech-sw-viewer-core-0.2.0.tgz"
+"@meko-tech/sw-viewer-core": "https://github.com/MeKo-Tech/sw-viewer-core/releases/download/v0.2.1/meko-tech-sw-viewer-core-0.2.1.tgz"
 ```
 
 In a bundler with manual chunks, group the package with `three`, so it stays out
@@ -105,8 +105,8 @@ The sample parts aren't committed here. The tests read them from a checkout of
 `MeKo-Tech/Solidworks-File-Decoder` and compare the mesh volume with the volume
 SolidWorks reports (`tests/wahrheit_testdaten.json`).
 
-## License note
+## License
 
-The decoder is our own work, derived from the file data alone.
+MIT, see [LICENSE](LICENSE). The decoder is our own work, derived from the file data alone.
 `Solidworks-File-Decoder/extern/sldfile` (PolyForm Noncommercial) is **not** used and
 must not be copied from.
