@@ -105,7 +105,14 @@ export function SwViewerPanel({
   const [measureMode, setMeasureMode] = useState<SwMeasureMode | null>(defaultMeasureMode);
   const [section, setSection] = useState<SwSectionSpec | null>(null);
   const [picking, setPicking] = useState<"face" | "cylinder" | null>(null);
-  const [hidden, setHidden] = useState<string[]>([]);
+  // Hidden ids belong to the result they were set for; a new result starts from its
+  // saved state in the same render, so stale ids never reach the new model.
+  const [hiddenState, setHiddenState] = useState<{ result: SwParseResult | null; ids: string[] }>({ result: null, ids: [] });
+  const hidden = useMemo(
+    () => (hiddenState.result === result ? hiddenState.ids : initialHiddenComponents(result)),
+    [hiddenState, result],
+  );
+  const setHidden = useCallback((ids: string[]) => setHiddenState({ result, ids }), [result]);
   const [measurement, setMeasurement] = useState<SwMeasurement | null>(null);
   const [pins, setPins] = useState<SwPinnedMeasurement[]>([]);
   const [sheet, setSheet] = useState<number | null>(null);
@@ -113,7 +120,6 @@ export function SwViewerPanel({
 
   // Per-model state starts over with every new result.
   useEffect(() => {
-    setHidden(initialHiddenComponents(result));
     setSection(null);
     setPicking(null);
     setMeasurement(null);

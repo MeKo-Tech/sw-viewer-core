@@ -46,5 +46,11 @@ export const propertyRows = (props: Record<string, string> | undefined): [string
     .filter(([, v]) => v.trim() !== "")
     .sort(([a], [b]) => a.localeCompare(b));
 
+/** Effect key of a section spec: equal specs give equal keys, whatever their identity. */
+export const sectionKey = (section: unknown) => JSON.stringify(section ?? null);
+
+/** Effect key of an id list: the same ids in any order and any array give the same key. */
+export const idSetKey = (ids: readonly string[] | undefined) => (ids ? JSON.stringify([...new Set(ids)].sort()) : null);
+
 /** Joins class names, skipping falsy ones. */
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");

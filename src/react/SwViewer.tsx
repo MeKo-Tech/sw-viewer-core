@@ -16,6 +16,7 @@ import {
   type SwViewerOptions,
 } from "../three/viewer.ts";
 import type { SwParseResult } from "../types.ts";
+import { idSetKey, sectionKey } from "./helpers.ts";
 import { type SwSource, useSwParse } from "./useSwParse.ts";
 
 /** Viewer setup, read once on mount. */
@@ -193,13 +194,19 @@ export function SwViewer({
     viewerRef.current?.setModel(effective);
   }, [effective]);
 
+  // Keyed by content, so inline arrays and objects don't reapply on every render (each
+  // apply drops the hover, prunes picks and recomputes the section contour).
+  const hiddenKey = idSetKey(hiddenComponents);
   useEffect(() => {
     if (hiddenComponents) viewerRef.current?.setHiddenComponents(hiddenComponents);
-  }, [hiddenComponents, effective]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hiddenKey, effective]);
 
+  const sectionSpecKey = sectionKey(section);
   useEffect(() => {
     viewerRef.current?.setSection(section);
-  }, [section]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionSpecKey]);
 
   useEffect(() => {
     viewerRef.current?.setMeasureMode(measureMode);

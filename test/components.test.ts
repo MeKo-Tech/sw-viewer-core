@@ -12,7 +12,7 @@ import {
   rgbCss,
   setComponentHidden,
 } from "../src/three/components.ts";
-import { countComponents, faceTypeCounts, massGrams, modelSize, parseDecimal, propertyRows, sliderStep } from "../src/react/helpers.ts";
+import { countComponents, faceTypeCounts, idSetKey, massGrams, modelSize, parseDecimal, propertyRows, sectionKey, sliderStep } from "../src/react/helpers.ts";
 import { defaultMeasurePanelLabels, defaultToolbarLabels, mergeLabels } from "../src/react/labels.ts";
 import type { SwComponentNode } from "../src/types.ts";
 
@@ -95,5 +95,17 @@ describe("React labels and helpers", () => {
     assert.deepEqual(propertyRows({ b: "2", a: "1", empty: " " }), [["a", "1"], ["b", "2"]]);
     assert.equal(sliderStep(0, 2000), 1);
     assert.equal(sliderStep(1, 1), 0.01);
+  });
+});
+
+describe("effect keys", () => {
+  it("are equal for equal content, whatever the identity", () => {
+    assert.equal(idSetKey(["b", "a"]), idSetKey(["a", "b", "a"]));
+    assert.notEqual(idSetKey(["a"]), idSetKey(["a", "b"]));
+    assert.notEqual(idSetKey([]), idSetKey(undefined));
+    assert.equal(idSetKey(undefined), null);
+    assert.equal(sectionKey({ axis: "x", offset: 1 }), sectionKey({ axis: "x", offset: 1 }));
+    assert.notEqual(sectionKey({ axis: "x", offset: 1 }), sectionKey({ axis: "x", offset: 2 }));
+    assert.equal(sectionKey(null), sectionKey(undefined));
   });
 });
