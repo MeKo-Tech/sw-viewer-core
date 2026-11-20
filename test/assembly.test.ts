@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { readAssembly, readAssemblyMeshes } from "../src/assembly.ts";
+import { directoryOrder, readAssembly, readAssemblyMeshes } from "../src/assembly.ts";
 import { instancePathOf, parseComponentTree } from "../src/assemblyTree.ts";
 import type { SwContainer, SwEntry } from "../src/container.ts";
 
@@ -446,4 +446,87 @@ it("suffixes same-named siblings in order and handles many of them quickly", () 
   assert.equal(big.roots.length, 20_000);
   assert.equal(new Set(big.roots.map((n) => n.id)).size, 20_000);
   assert.equal(big.roots.at(-1)!.id, "a#20000");
+});
+
+// The former directoryOrder (indexOf sweeps per entry), as the reference.
+const directoryOrderReference = (directory: Uint8Array, componentKeys: Map<string, string>) => {
+  const entries = [...componentKeys].map(([key, partKey]) => {
+    const bar = key.indexOf("|");
+    return { assembly: key.slice(0, bar), instance: key.slice(bar + 1), partKey };
+  });
+  for (const alignment of [0, 1]) {
+    const text = new TextDecoder("utf-16le").decode(directory.subarray(alignment, alignment + ((directory.length - alignment) & ~1)));
+    const hits: { start: number; end: number; partKey: string }[] = [];
+    for (const { assembly, instance, partKey } of entries) {
+      const needle = instance + "@" + assembly;
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (text[i + needle.length] !== "/") hits.push({ start: i, end: i + needle.length, partKey });
+      }
+    }
+    for (const { instance, partKey } of entries) {
+      const needle = instance + "@";
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (hits.some((h) => h.start <= i && i < h.end)) continue;
+        let end = i + needle.length;
+        while (end < text.length && /[\p{L}\p{N} _.-]/u.test(text[end])) end++;
+        if (text[end] !== "/") hits.push({ start: i, end, partKey });
+      }
+    }
+    hits.sort((a, b) => a.start - b.start || b.end - a.end);
+    const unique = hits.filter((h, j) => j === 0 || h.start !== hits[j - 1].start);
+    const order: string[] = [];
+    unique.forEach((h, j) => {
+      const next = unique[j + 1]?.start ?? text.length;
+      if (/\d{3}-\d{3}-\d{3}/.test(text.slice(h.end, next))) order.push(h.partKey);
+    });
+    if (order.length) return order;
+  }
+  return [];
+};
+
+const utf16 = (text: string, pad = 0) => {
+  const out = new Uint8Array(pad + 2 * text.length);
+  for (let i = 0; i < text.length; i++) {
+    out[pad + 2 * i] = text.charCodeAt(i) & 0xff;
+    out[pad + 2 * i + 1] = text.charCodeAt(i) >> 8;
+  }
+  return out;
+};
+
+it("directoryOrder matches the former indexOf sweeps on random directories", () => {
+  let seed = 7;
+  const rnd = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+    return (seed >>> 8) % n;
+  };
+  const names = ["a-1", "a-2", "b-1", "ab-1", "a", "W\u00fcrfel-1", "x@y-1", ""];
+  const assemblies = ["Top", "Top2", "Sub", "T", ""];
+  const pieces = [...names, ...assemblies, "@", "/", " ", "_", ".", "000-111-222", "12-345", "\u0000", "\u0007", "Z",
+    "a-1@", "b-1@", "ab-1@", "@Top", "@Sub", "@Top/", "\u0000000-001-002", "\u0000000-001-002", "\u0000000-001-002"];
+  let nonEmpty = 0;
+  for (let run = 0; run < 3000; run++) {
+    const keys = new Map<string, string>();
+    for (let k = rnd(6); k >= 0; k--) keys.set(`${assemblies[rnd(assemblies.length)]}|${names[rnd(names.length)]}`, `part${rnd(5)}|Default`);
+    let text = "";
+    for (let i = rnd(40); i > 0; i--) text += pieces[rnd(pieces.length)];
+    const bytes = utf16(text, rnd(2));
+    const expected = directoryOrderReference(bytes, keys);
+    if (expected.length) nonEmpty++;
+    assert.deepEqual(directoryOrder(bytes, keys), expected, JSON.stringify([text, [...keys]]));
+  }
+  assert.ok(nonEmpty > 300, `only ${nonEmpty} non-empty orders`);
+});
+
+it("directoryOrder handles thousands of instances quickly", () => {
+  const keys = new Map<string, string>();
+  let text = "";
+  for (let i = 0; i < 20_000; i++) {
+    keys.set(`Top|Part${i}-1`, `C:\\parts\\part${i}.SLDPRT|Default`);
+    text += `\u0000\u0007Part${i}-1@Top\u0000\u0003${String(i % 1000).padStart(3, "0")}-000-001\u0000`;
+  }
+  const t0 = performance.now();
+  const order = directoryOrder(utf16(text), keys);
+  assert.ok(performance.now() - t0 < 1000, "took too long");
+  assert.equal(order.length, 20_000);
+  assert.equal(order[123], "C:\\parts\\part123.SLDPRT|Default");
 });

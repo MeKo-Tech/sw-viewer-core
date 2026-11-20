@@ -367,27 +367,56 @@ const textOf = (bytes: Uint8Array, alignment: number) =>
  * Files saved as a copy keep the old assembly name, so a second pass matches the
  * instance name alone.
  */
-const directoryOrder = (directory: Uint8Array, componentKeys: Map<string, string>) => {
+export const directoryOrder = (directory: Uint8Array, componentKeys: Map<string, string>) => {
   const entries = [...componentKeys].map(([key, partKey]) => {
     const bar = key.indexOf("|");
     return { assembly: key.slice(0, bar), instance: key.slice(bar + 1), partKey };
   });
+  // Every needle is `instance@…`: one sweep over the "@" signs, looking up the text
+  // before each one by instance length, finds all occurrences of all entries.
+  const byInstance = new Map<string, number[]>();
+  entries.forEach(({ instance }, k) => {
+    const list = byInstance.get(instance);
+    if (list) list.push(k);
+    else byInstance.set(instance, [k]);
+  });
+  const lengths = [...new Set(entries.map((e) => e.instance.length))];
   for (const alignment of [0, 1]) {
     const text = textOf(directory, alignment);
     const hits: { start: number; end: number; partKey: string }[] = [];
-    for (const { assembly, instance, partKey } of entries) {
-      const needle = instance + "@" + assembly;
-      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
-        if (text[i + needle.length] !== "/") hits.push({ start: i, end: i + needle.length, partKey });
+    /** Occurrences of `instance@` per entry, for the instance-only pass. */
+    const loose: { entry: number; start: number; at: number }[] = [];
+    for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+      for (const len of lengths) {
+        if (len > at) continue;
+        const list = byInstance.get(text.slice(at - len, at));
+        if (!list) continue;
+        for (const k of list) {
+          const { assembly, partKey } = entries[k];
+          loose.push({ entry: k, start: at - len, at });
+          const end = at + 1 + assembly.length;
+          if (text.startsWith(assembly, at + 1) && text[end] !== "/") hits.push({ start: at - len, end, partKey });
+        }
       }
     }
-    for (const { instance, partKey } of entries) {
-      const needle = instance + "@";
-      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
-        if (hits.some((h) => h.start <= i && i < h.end)) continue;
-        let end = i + needle.length;
+    // Second pass in the former order (entry by entry, left to right): an occurrence
+    // inside an earlier hit does not count.
+    loose.sort((a, b) => a.entry - b.entry || a.start - b.start);
+    const covered = new Uint8Array(text.length + 1);
+    const cover = (start: number, end: number) => covered.fill(1, start, end);
+    for (const h of hits) cover(h.start, h.end);
+    const nameEnd = new Map<number, number>();
+    for (const { entry, start, at } of loose) {
+      if (covered[start]) continue;
+      let end = nameEnd.get(at);
+      if (end === undefined) {
+        end = at + 1;
         while (end < text.length && /[\p{L}\p{N} _.-]/u.test(text[end])) end++;
-        if (text[end] !== "/") hits.push({ start: i, end, partKey });
+        nameEnd.set(at, end);
+      }
+      if (text[end] !== "/") {
+        hits.push({ start, end, partKey: entries[entry].partKey });
+        cover(start, end);
       }
     }
     hits.sort((a, b) => a.start - b.start || b.end - a.end);
