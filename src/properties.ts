@@ -14,6 +14,13 @@ export const PROPERTY_SOURCES = [
   "docProps/core.xml",
 ] as const;
 
+/**
+ * Sets an own, enumerable property, also for names like `__proto__` (a plain
+ * assignment would change the prototype or be ignored).
+ */
+const setOwn = (out: Record<string, string>, name: string, value: string) =>
+  Object.defineProperty(out, name, { value, enumerable: true, writable: true, configurable: true });
+
 /** `<property name="…"><vt:lpstr>value</vt:lpstr><FPVals>…</FPVals></property>` → name → value.
  *  The value is the first typed child; FPVals (the unevaluated expression) is skipped.
  *  Unnamed entries and internal `_PID_*` blobs are left out. */
@@ -22,10 +29,10 @@ export const readPropertyList = (xml: Uint8Array | string, out: Record<string, s
   if (!root) return out;
   for (const p of findAll(root, "property")) {
     const name = p.attributes.name?.trim();
-    if (!name || name.startsWith("_PID_") || name in out) continue;
+    if (!name || name.startsWith("_PID_") || Object.hasOwn(out, name)) continue;
     const valueEl = p.children.find((c) => c.localName !== "FPVals");
     const value = (valueEl ? textContent(valueEl) : p.text).trim();
-    if (value) out[name] = value;
+    if (value) setOwn(out, name, value);
   }
   return out;
 };
@@ -36,7 +43,7 @@ export const readCoreProperties = (xml: Uint8Array | string, out: Record<string,
   if (!root) return out;
   for (const el of root.children) {
     const value = textContent(el).trim();
-    if (value && !(el.localName in out)) out[el.localName] = value;
+    if (value && !Object.hasOwn(out, el.localName)) setOwn(out, el.localName, value);
   }
   return out;
 };

@@ -43,3 +43,18 @@ describe("document properties of the sample files", { skip: skipUnless("Baugr3.s
     assert.equal(r.properties?.title, "Teil MeKo");
   });
 });
+
+describe("property names shadowing Object.prototype", () => {
+  it("keeps constructor, toString and __proto__ as plain values", () => {
+    const xml = `<Properties>${["constructor", "toString", "__proto__", "hasOwnProperty"]
+      .map((n, i) => `<property name="${n}"><vt:lpwstr>v${i}</vt:lpwstr></property>`)
+      .join("")}</Properties>`;
+    const out = readPropertyList(xml);
+    assert.deepEqual(Object.keys(out), ["constructor", "toString", "__proto__", "hasOwnProperty"]);
+    assert.equal(out.constructor, "v0");
+    assert.equal(Object.getPrototypeOf(out), Object.prototype);
+    assert.equal(JSON.parse(JSON.stringify(out)).__proto__, "v2");
+    const core = readCoreProperties(`<cp:coreProperties><dc:constructor>c</dc:constructor><dc:title>t</dc:title></cp:coreProperties>`);
+    assert.deepEqual(Object.entries(core), [["constructor", "c"], ["title", "t"]]);
+  });
+});
