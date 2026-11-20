@@ -222,6 +222,9 @@ export interface SwViewerPanelLabels {
   error?: (error: Error) => string;
   /** Shown when the file has neither mesh nor thumbnail. */
   empty: string;
+  /** Tooltip and accessible name of the side bar toggle. */
+  sidebarShow: string;
+  sidebarHide: string;
 }
 
 export const defaultViewerPanelLabels: SwViewerPanelLabels = {
@@ -234,6 +237,8 @@ export const defaultViewerPanelLabels: SwViewerPanelLabels = {
   loading: "Reading file …",
   error: (e) => `Could not read the file: ${e.message}`,
   empty: "The file contains no displayable geometry.",
+  sidebarShow: "Show details",
+  sidebarHide: "Hide details",
 };
 
 const isPlainObject = (x: unknown): x is Record<string, unknown> =>

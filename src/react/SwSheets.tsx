@@ -67,3 +67,25 @@ export function SwSheets({ sheets, selected, onSelect, hasModel = true, urls: gi
     </section>
   );
 }
+
+export interface SwSheetViewProps {
+  sheets: readonly SwSheet[];
+  /** Object URLs of the sheet images (from `useSheetUrls`). */
+  urls: readonly string[];
+  /** Index of the sheet to show. */
+  index: number;
+  labels?: DeepPartial<SwSheetsLabels>;
+  className?: string;
+}
+
+/** A sheet image filling its positioned parent, e.g. over the 3D view. Renders nothing until its URL exists. */
+export function SwSheetView({ sheets, urls, index, labels: partial, className }: SwSheetViewProps) {
+  const L = mergeLabels(defaultSheetsLabels, partial);
+  const url = urls[index];
+  if (!url) return null;
+  return (
+    <div className={cx("sw-sheet-view", className)}>
+      <img src={url} alt={sheetName(L, sheets[index]?.name, index)} />
+    </div>
+  );
+}

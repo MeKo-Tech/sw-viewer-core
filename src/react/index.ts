@@ -7,11 +7,20 @@ export {
   type UseSwParseOptions,
   useSwParse,
 } from "./useSwParse.ts";
-export { SwViewerPanel, type SwViewerPanelProps } from "./SwViewerPanel.tsx";
+export { type SwSidebarMode, SwViewerPanel, type SwViewerPanelProps } from "./SwViewerPanel.tsx";
+export {
+  type SwViewerState,
+  type SwViewerStateSheetsProps,
+  type SwViewerStateSheetViewProps,
+  type SwViewerStateToolbarProps,
+  type SwViewerStateViewerProps,
+  type UseSwViewerStateOptions,
+  useSwViewerState,
+} from "./useSwViewerState.ts";
 export { SwToolbar, type SwToolbarProps } from "./SwToolbar.tsx";
 export { SwComponentTree, type SwComponentTreeProps } from "./SwComponentTree.tsx";
 export { SwInfoPanel, type SwInfoPanelProps } from "./SwInfoPanel.tsx";
-export { SwSheets, type SwSheetsProps, useSheetUrls } from "./SwSheets.tsx";
+export { SwSheets, type SwSheetsProps, SwSheetView, type SwSheetViewProps, useSheetUrls } from "./SwSheets.tsx";
 export { SwMeasurePanel, type SwMeasurePanelProps } from "./SwMeasurePanel.tsx";
 export {
   type DeepPartial,
