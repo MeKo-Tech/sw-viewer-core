@@ -4,7 +4,7 @@ import {
   type SwContainer,
 } from "./container.ts";
 import { readAssemblyMeshes } from "./assembly.ts";
-import { buildBodyMesh, scanFaceTables } from "./displayMesh.ts";
+import { buildBodyMesh, MAX_VERTICES, scanFaceTables } from "./displayMesh.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
 import { readBodyColor, readFaceColors } from "./visualProps.ts";
 
