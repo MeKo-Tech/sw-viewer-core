@@ -148,6 +148,12 @@ export const createSwViewer = (container: HTMLElement, options: SwViewerOptions 
   container.prepend(canvas);
 
   injectOverlayStyles(container.ownerDocument);
+  // The label overlay is absolutely positioned over the canvas; in a static container it
+  // would align with some outer ancestor instead. Restored on dispose.
+  const view = container.ownerDocument.defaultView;
+  const restorePosition =
+    view && view.getComputedStyle(container).position === "static" ? container.style.position : undefined;
+  if (restorePosition !== undefined) container.style.position = "relative";
   const labelRenderer = new CSS2DRenderer();
   labelRenderer.domElement.className = "sw-labels";
   Object.assign(labelRenderer.domElement.style, { position: "absolute", inset: "0", pointerEvents: "none" });
@@ -381,6 +387,8 @@ export const createSwViewer = (container: HTMLElement, options: SwViewerOptions 
     labelRenderer,
     setModel(next) {
       clearModel();
+      // A frame still pending for the previous model must not fire for an empty scene.
+      firstFramePending = false;
       result = next;
       box = null;
       components = next?.components;
@@ -483,6 +491,7 @@ export const createSwViewer = (container: HTMLElement, options: SwViewerOptions 
       cube = null;
       controls.dispose();
       labelRenderer.domElement.remove();
+      if (restorePosition !== undefined) container.style.position = restorePosition;
       renderer.dispose();
       // Browsers cap live WebGL contexts (Safari especially); free ours right away.
       renderer.forceContextLoss();

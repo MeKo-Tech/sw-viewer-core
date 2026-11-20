@@ -106,6 +106,10 @@ props; the other components are plain controlled components:
 | `SwSheets` | `sheets`, `selected` (index, null = 3D model), `onSelect`; `useSheetUrls(sheets)` gives object URLs for a large view |
 | `SwMeasurePanel` | `measurement`, `pins`, `onPin`, `onRemovePin`, `onClear`, `mode`, `components` |
 
+`SwViewer`'s `onSelect` reports measure picks (`SwViewerPick[]`); the DOM `select`
+event of the wrapper `<div>` is not forwarded (`onSelect` is left out of the
+passed-through div attributes).
+
 Helpers: `initialHiddenComponents(result)` (components SolidWorks saved hidden),
 `setComponentHidden`, `partColors`, `formatDimension`, `formatMeasureValue`.
 A section through a hole or on a face needs a click in the model: call
@@ -161,7 +165,10 @@ The renderer is created with `stencil: true` and local clipping for the closed,
 hatched section cap; the section contour comes from `sectionContour` and can be
 picked and measured (the `wuerfel_L20` bore measures Ø20.000). The orientation
 cube renders into a scissor viewport, so the viewer keeps one WebGL context.
-`dispose()` frees the context, the label DOM and all listeners. The scene helpers
+`dispose()` frees the context, the label DOM and all listeners. The dimension
+labels are an absolutely positioned overlay inside `container`; a container with
+`position: static` is switched to `relative` (and restored on dispose). Edges are
+on by default (`edges: false` to start without them). The scene helpers
 (`buildSwGroup`, `fitCamera`, `disposeObject`), the section maths (`sectionPlane`,
 `sectionRange`) and the measurement model (`computeMeasurement`,
 `primaryDimension`) are exported too. Demo: `npm run demo` → `/react.html`.
