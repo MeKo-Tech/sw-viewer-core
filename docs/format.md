@@ -38,7 +38,7 @@ detected and rejected for now.
 | --- | --- |
 | `Contents/DisplayLists` | tessellated display mesh (below) |
 | `PreviewPNG` | PNG thumbnail, the fallback when there is no mesh |
-| `ThirdPtyStore/VisualStates` | part color (first `moVisualProperties_c`, then a COLORREF `R G B 00`) – unreliable, see open points |
+| `ThirdPtyStore/VisualStates` | part color (first `moVisualProperties_c`, then a COLORREF `R G B 00`); textured appearances give no color, see open points |
 | `_MO_VERSION_<n>/…` | file version from the entry name |
 
 ## `Contents/DisplayLists`: face tables
@@ -84,9 +84,13 @@ wound outward: the signed volume is positive.
 
 ## Open points
 
-- **Colors.** The "first `moVisualProperties_c`" rule gives white for some parts,
-  where SolidWorks shows its default bluish grey. Per-face and per-feature colors
-  (`VisualStates`) are not read.
+- **Colors.**
+  - After the COLORREF come 8 bytes and then the texture name as an MFC Unicode CString
+    (`FF FE FF`, length, UTF-16).
+  - A textured appearance (non-empty name, e.g. `texture`) stores white or a nominal base
+    color that SolidWorks does not display, so it is reported as no color and the viewer
+    uses its default grey. That affects 6 of 28 samples.
+  - Per-face and per-feature colors (`VisualStates`) are not read.
 - **Parts without a mesh** (imported parts) fall back to the thumbnail. No such sample
   is in `testdaten/`. The 40 project parts mentioned in the decoder repo are needed
   to test this.

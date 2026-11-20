@@ -53,7 +53,7 @@ describe("sample parts", { skip: !haveSamples && "SW_DECODER_REPO not set" }, ()
       const mesh = r.meshes[0];
       assert.equal(mesh.indices.length % 3, 0);
       assert.ok(mesh.indices.every((i) => i < mesh.positions.length / 3));
-      assert.ok(mesh.color, "body color");
+      assert.ok(!mesh.color || mesh.color.every((v) => v >= 0 && v <= 1), "body color in range");
 
       const expected = truth[name]?.volumen_mm3;
       assert.ok(expected, `truth volume for ${name}`);
