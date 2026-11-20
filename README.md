@@ -66,11 +66,105 @@ tree keeps rendering. On unmount, the component releases its WebGL context right
 away.
 
 Pass `result` instead of `source` when you have already parsed the file. Use
-`useSwParse(source, createWorker)` for the parse state without the viewer. The
-component has no built-in texts, so the app owns all UI strings. Without React,
-`@meko-tech/sw-viewer-core/three` offers `createSwViewer(container)` and the scene helpers
-`buildSwGroup`, `fitCamera` and `disposeObject`. Demo: `npm run demo` →
-`/react.html`.
+`useSwParse(source, createWorker)` for the parse state without the viewer.
+
+### Viewer panel
+
+Most apps use `<SwViewerPanel>`. It parses the file and wires the viewer to a
+toolbar (views, edges, colour by part, measure modes, section menu), an
+orientation cube, and a side bar with drawing sheets, the component tree, the
+measurement and model info (size, volume, area, density → mass, properties):
+
+```tsx
+import { SwViewerPanel } from "@meko-tech/sw-viewer-core/react";
+import "@meko-tech/sw-viewer-core/sw-viewer.css"; // optional default styles
+
+<SwViewerPanel
+  source={file}
+  createWorker={() => new SwParseWorker()}
+  labels={germanLabels} // see "Labels"
+  locale="de-DE"        // numbers in the panels and on dimension labels
+  style={{ height: 600 }}
+/>
+```
+
+More props: `defaultMeasureMode` (`"auto"`, null for off), `defaultEdges`,
+`viewCube`, `sidebar`, `defaultDensity`/`onDensityChange` (g/cm³),
+`formatDimension`/`formatValue`, `onResult`, `onError`, `onReady`, `onMeasure`.
+
+### Building blocks
+
+For an own layout, combine the parts. `<SwViewer>` takes the viewer state as
+props; the other components are plain controlled components:
+
+| Component | Purpose |
+| --- | --- |
+| `SwViewer` | `edges`, `colorMode` (`"file"`/`"part"`), `section` (`SwSectionSpec`), `measureMode`, `hiddenComponents`, `viewCube`, `viewCubeLabels`, `formatDimension`, `onMeasure`, `onSelect`, `onPinsChange` |
+| `SwToolbar` | Each group renders when its handler is set: `onEdgesChange`, `onColorModeChange`, `onMeasureModeChange`, `onSectionChange` (+ `box`, `onPickSection`, `sectionPicking`), `onView`, `onResetView`; `children` for extra buttons |
+| `SwComponentTree` | `components`, `hidden`, `onHiddenChange`: checkbox per node (sub-trees toggle together), colour swatch per part file, suppressed nodes disabled |
+| `SwInfoPanel` | `result`, `fileName`, `density`/`defaultDensity`/`onDensityChange`, `locale` |
+| `SwSheets` | `sheets`, `selected` (index, null = 3D model), `onSelect`; `useSheetUrls(sheets)` gives object URLs for a large view |
+| `SwMeasurePanel` | `measurement`, `pins`, `onPin`, `onRemovePin`, `onClear`, `mode`, `components` |
+
+Helpers: `initialHiddenComponents(result)` (components SolidWorks saved hidden),
+`setComponentHidden`, `partColors`, `formatDimension`, `formatMeasureValue`.
+A section through a hole or on a face needs a click in the model: call
+`viewer.pickSectionTarget("cylinder" | "face")` (from `onReady`) and pass the
+returned spec as `section`.
+
+### Labels
+
+The components have no built-in strings. Each takes `labels`, merged over the
+exported English defaults (`defaultToolbarLabels`, `defaultComponentTreeLabels`,
+`defaultInfoPanelLabels`, `defaultMeasurePanelLabels`, `defaultSheetsLabels`,
+`defaultViewCubeLabels`, `defaultViewerPanelLabels`; types `Sw…Labels`). Nested
+records merge key by key, so partial objects work:
+
+```ts
+const germanLabels: DeepPartial<SwViewerPanelLabels> = {
+  toolbar: { edges: "Kanten", measureModes: { face: "Fläche" } },
+  measure: { item: (item) => ({ diameter: "Durchmesser" })[item.kind] ?? item.label },
+  viewCube: { front: "VORNE", top: "OBEN" },
+};
+```
+
+Measured values (`SwMeasureItem`) carry a machine `kind` (`diameter`,
+`wall-thickness`, `angle`, …) and an English `label` hint; translate by `kind`.
+
+### Styling
+
+Components use stable `sw-*` class names (`sw-toolbar`, `sw-btn` with
+`aria-pressed`, `sw-tree`, `sw-info`, `sw-measure`, `sw-sheets`, `sw-panel`, …).
+`@meko-tech/sw-viewer-core/sw-viewer.css` is a small neutral light theme driven
+by custom properties (`--sw-accent`, `--sw-border`, `--sw-dim`, …); skip it or
+override any rule. The viewer injects low-specificity (`:where`) defaults for the
+dimension labels in the 3D view (`sw-dim`, `sw-snap`, `sw-measure-point`).
+
+### Without React
+
+`@meko-tech/sw-viewer-core/three` offers `createSwViewer(container, options)`:
+
+```ts
+const viewer = createSwViewer(el, { viewCube: true, onMeasure: (m) => show(m) });
+viewer.setModel(result);
+viewer.setMeasureMode("auto");               // "point" | "edge" | "face" | "angle" | null
+viewer.setSection({ kind: "axis", axis: "x" }); // or { kind: "cylinder", center, axis, angle } / { kind: "face", point, normal }
+viewer.setComponentVisible("Sub-1", false);  // hides the sub-tree
+viewer.setColorMode("part");
+viewer.setEdgesVisible(false);
+viewer.setView("top");                       // front, back, top, bottom, left, right, iso
+viewer.pinMeasurement();
+viewer.clearMeasurements();
+```
+
+The renderer is created with `stencil: true` and local clipping for the closed,
+hatched section cap; the section contour comes from `sectionContour` and can be
+picked and measured (the `wuerfel_L20` bore measures Ø20.000). The orientation
+cube renders into a scissor viewport, so the viewer keeps one WebGL context.
+`dispose()` frees the context, the label DOM and all listeners. The scene helpers
+(`buildSwGroup`, `fitCamera`, `disposeObject`), the section maths (`sectionPlane`,
+`sectionRange`) and the measurement model (`computeMeasurement`,
+`primaryDimension`) are exported too. Demo: `npm run demo` → `/react.html`.
 
 ## Installing
 
@@ -78,7 +172,7 @@ Each release attaches the npm package to its GitHub Release. Apps depend on that
 file, so installing needs no registry and no token:
 
 ```json
-"@meko-tech/sw-viewer-core": "https://github.com/MeKo-Tech/sw-viewer-core/releases/download/v0.2.1/meko-tech-sw-viewer-core-0.2.1.tgz"
+"@meko-tech/sw-viewer-core": "https://github.com/MeKo-Tech/sw-viewer-core/releases/download/v0.3.0/meko-tech-sw-viewer-core-0.3.0.tgz"
 ```
 
 In a bundler with manual chunks, group the package with `three`, so it stays out
@@ -97,7 +191,7 @@ Uses Node 24, which runs the `.ts` files directly.
 npm install --no-bin-links           # --no-bin-links: the NTFS mount refuses chmod
 SW_DECODER_REPO=../Solidworks-File-Decoder npm test
 npm run typecheck
-npm run demo                         # http://localhost:5173, drop a .SLDPRT or .SLDASM
+npm run demo                         # http://localhost:5173 (/react.html: the panel), .SLDPRT, .SLDASM or .SLDDRW
 node tools/inspect.ts part.SLDPRT --entries --stl out.stl --png thumb.png
 ```
 

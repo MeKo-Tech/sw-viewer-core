@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as THREE from "three";
-import { buildSwGroup, disposeObject, fitCamera } from "../src/three/scene.ts";
+import { analyzeMesh } from "../src/geometry/index.ts";
+import {
+  applyPartColors,
+  buildSwGroup,
+  disposeObject,
+  fitCamera,
+  segmentEdges,
+  setEdgesVisible,
+  swMeshData,
+  triangleFaces,
+} from "../src/three/scene.ts";
 import type { SwMesh } from "../src/types.ts";
+import { cube } from "./meshes.ts";
 
 // Two triangles forming a unit quad in the z=0 plane; vertex 3 is used by the second triangle only.
 const quad = (extra: Partial<SwMesh> = {}): SwMesh => ({
@@ -195,4 +206,101 @@ test("disposeObject disposes geometries and materials", () => {
   ];
   assert.equal(disposed.length, expected.length);
   for (const o of expected) assert.ok(disposed.includes(o));
+});
+
+// ---------- edges, face lookup, visibility, colours ----------
+
+
+const analyzedCube = () => {
+  const m = cube(10);
+  analyzeMesh(m);
+  return m;
+};
+
+test("each mesh gets its edges as a LineSegments child sharing mesh.edges", () => {
+  const m = analyzedCube();
+  const mesh = meshes(buildSwGroup([m]))[0];
+  const data = swMeshData(mesh)!;
+  assert.ok(data.edgeLines instanceof THREE.LineSegments);
+  assert.equal(data.edgeLines.parent, mesh);
+  assert.equal((data.edgeLines.geometry.getAttribute("position") as THREE.BufferAttribute).array, m.edges);
+  // Segment -> edge mapping covers every segment of the 12 cube edges.
+  const segEdge = (data.edgeLines.userData as { segEdge: Int32Array }).segEdge;
+  assert.equal(segEdge.length, m.edges!.length / 6);
+  assert.ok(segEdge.every((e) => e >= 0 && e < 12));
+  assert.equal(mesh.material.polygonOffset, true);
+
+  const noEdges = meshes(buildSwGroup([m], { edges: false }))[0];
+  assert.equal(swMeshData(noEdges)!.edgeLines, undefined);
+  assert.equal(noEdges.children.length, 0);
+});
+
+test("setEdgesVisible toggles only the edge lines", () => {
+  const group = buildSwGroup([analyzedCube(), analyzedCube()]);
+  setEdgesVisible(group, false);
+  for (const m of meshes(group)) {
+    assert.equal(m.visible, true);
+    assert.equal(swMeshData(m)!.edgeLines!.visible, false);
+  }
+  setEdgesVisible(group, true);
+  for (const m of meshes(group)) assert.equal(swMeshData(m)!.edgeLines!.visible, true);
+});
+
+test("triangleFaces maps every triangle to its face range", () => {
+  const m = analyzedCube();
+  const tf = triangleFaces(m);
+  assert.equal(tf.length, m.indices.length / 3);
+  // cube(): six faces of two triangles each, in order.
+  assert.deepEqual([...tf], [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+  assert.deepEqual([...triangleFaces(quad())], [-1, -1]);
+  assert.deepEqual([...segmentEdges(quad())], []);
+  const data = swMeshData(meshes(buildSwGroup([m]))[0])!;
+  assert.deepEqual([...data.triFace], [...tf]);
+  assert.equal(data.swIndex, 0);
+  assert.equal(data.swMesh, m);
+});
+
+test("meshes saved hidden start invisible and carry their componentId", () => {
+  const [a, b] = meshes(buildSwGroup([quad({ componentId: "A-1", visible: false }), quad({ componentId: "B-1" })]));
+  assert.equal(a.visible, false);
+  assert.equal(b.visible, true);
+  assert.equal(swMeshData(a)!.componentId, "A-1");
+  assert.equal(swMeshData(b)!.componentId, "B-1");
+});
+
+test("applyPartColors colours meshes by component and restores the file colours", () => {
+  const group = buildSwGroup([
+    quad({ componentId: "A-1", color: [1, 0, 0] }),
+    quad({ componentId: "B-1", faceRanges: [{ start: 0, count: 3, color: [0, 1, 0] }, { start: 3, count: 3 }] }),
+    quad(),
+  ]);
+  const [a, b, c] = meshes(group);
+  applyPartColors(group, new Map([["A-1", [0, 0, 1]], ["B-1", [0, 0, 1]]]));
+  assert.equal(a.material.color.getHexString(), "0000ff");
+  assert.equal(b.material.vertexColors, false);
+  assert.equal(b.material.color.getHexString(), "0000ff");
+  assert.equal(c.material.color.getHex(), 0xcccccc);
+  applyPartColors(group, null);
+  assert.equal(a.material.color.getHex(), 0xff0000);
+  assert.equal(b.material.vertexColors, true);
+  assert.equal(b.material.color.getHex(), 0xffffff);
+});
+
+test("disposeObject also frees line geometries and shared materials once", () => {
+  const group = buildSwGroup([analyzedCube(), analyzedCube()]);
+  const disposed = new Map<unknown, number>();
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+      for (const x of [o.geometry, o.material]) {
+        if (!disposed.has(x)) {
+          disposed.set(x, 0);
+          x.addEventListener("dispose", () => disposed.set(x, disposed.get(x)! + 1));
+        }
+      }
+    }
+  });
+  disposeObject(group);
+  // 2 mesh geometries + 2 mesh materials + 2 line geometries + 1 shared edge material.
+  assert.equal(disposed.size, 7);
+  for (const n of disposed.values()) assert.equal(n, 1);
 });
