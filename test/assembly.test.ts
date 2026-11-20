@@ -430,3 +430,20 @@ it("keeps the cache placements when the tree is unreadable or matches nothing", 
 
   assert.deepEqual(await readAssembly(container(), undefined, 3), { meshes: [], warnings: [] });
 });
+
+it("suffixes same-named siblings in order and handles many of them quickly", () => {
+  const tree = (refs: string) => `<swSolidWorks><swHeader><swFile id="1" swDocType="ASSEMBLY" swPath="Top.SLDASM"/>
+<swFile id="2" swDocType="PART" swPath="a.SLDPRT"/></swHeader><swModelList><swModel id="12" swFileRef="2"/>
+<swModel id="11" swFileRef="1">${refs}</swModel></swModelList></swSolidWorks>`;
+  const r = (name: string) => `<swReference swComponentName="${name}" swModelRef="12" swTransform="${T_IDENTITY}"/>`;
+  // A literal "a#3" takes that id first; the suffix counter skips it.
+  const small = parseComponentTree(tree([r("a"), r("a"), r("a#3"), r("a"), r("b"), r("a")].join("")))!;
+  assert.deepEqual(small.roots.map((n) => n.id), ["a", "a#2", "a#3", "a#4", "b", "a#5"]);
+
+  const t0 = performance.now();
+  const big = parseComponentTree(tree(r("a").repeat(20_000)))!;
+  assert.ok(performance.now() - t0 < 1000, "took too long");
+  assert.equal(big.roots.length, 20_000);
+  assert.equal(new Set(big.roots.map((n) => n.id)).size, 20_000);
+  assert.equal(big.roots.at(-1)!.id, "a#20000");
+});

@@ -146,6 +146,8 @@ export const parseComponentTree = (input: Uint8Array | string): SwComponentTree 
 
   const leaves: SwTreeLeaf[] = [];
   const ids = new Set<string>();
+  /** Next "#n" suffix to try per base id; ids only grow, so the smallest free n never drops. */
+  const nextSuffix = new Map<string, number>();
   let nodeCount = 0;
   let malformed = 0;
   let truncated = false;
@@ -166,8 +168,13 @@ export const parseComponentTree = (input: Uint8Array | string): SwComponentTree 
       const sub = modelById.get(r.attributes.swModelRef ?? "");
       const file = fileOf(sub);
       const name = instanceName(r);
-      let id = prefix + name;
-      for (let n = 2; ids.has(id); n++) id = prefix + name + "#" + n;
+      const base = prefix + name;
+      let id = base;
+      if (ids.has(id)) {
+        let n = nextSuffix.get(base) ?? 2;
+        while (ids.has((id = base + "#" + n))) n++;
+        nextSuffix.set(base, n + 1);
+      }
       ids.add(id);
       const local = transformFromXml(r.attributes.swTransform);
       if (!local) malformed++;
