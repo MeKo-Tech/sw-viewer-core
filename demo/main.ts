@@ -16,7 +16,12 @@ const previewImg = document.getElementById("preview") as HTMLImageElement;
 const fileInput = document.getElementById("file") as HTMLInputElement;
 
 // Edges, orientation cube and measuring (auto pick filter) with the framework-free viewer.
-const viewer = createSwViewer(stage, { viewCube: true, onMeasure: (m) => console.debug("measure", m) });
+// Cube colours could also come from --sw-cube-* custom properties on the stage.
+const viewer = createSwViewer(stage, {
+  viewCube: true,
+  viewCubeColors: { hover: 0xfde68a },
+  onMeasure: (m) => console.debug("measure", m),
+});
 viewer.setMeasureMode("auto");
 
 const parseInWorker = (buffer: ArrayBuffer) =>
