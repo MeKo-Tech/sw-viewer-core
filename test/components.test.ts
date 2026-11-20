@@ -79,10 +79,12 @@ describe("React labels and helpers", () => {
     assert.equal(L.measureModes.edge, "Edge");
     assert.equal(L.section, "Section");
     assert.equal(mergeLabels(defaultToolbarLabels, undefined), defaultToolbarLabels);
-    // Functions are replaced, not merged.
-    const M = mergeLabels(defaultMeasurePanelLabels, { item: (i) => `#${i.kind}` });
-    assert.equal(M.item({ kind: "radius", label: "Radius", value: 1, unit: "mm" }), "#radius");
-    assert.equal(defaultMeasurePanelLabels.item({ kind: "radius", label: "Radius", value: 1, unit: "mm" }), "Radius");
+    // Per-kind records merge key by key too; functions are replaced, not merged.
+    const M = mergeLabels(defaultMeasurePanelLabels, { items: { radius: "Halbmesser" }, element: (i) => `#${i}` });
+    assert.equal(M.items.radius, "Halbmesser");
+    assert.equal(M.items.diameter, "Diameter");
+    assert.equal(M.element(2), "#2");
+    assert.equal(defaultMeasurePanelLabels.items.radius, "Radius");
   });
 
   it("computes size, mass, face counts and properties", () => {

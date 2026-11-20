@@ -7,10 +7,13 @@ import {
   angle3,
   angleBetween,
   describe,
+  measureItem,
   measurePair,
   type SwAngle,
   type SwDescription,
   type SwMeasureItem,
+  type SwMeasureKind,
+  type SwMeasureUnit,
   type SwPick,
 } from "../geometry/measure.ts";
 import { add, basis, cross, dot, length, normalize, scale, sub, transformDir, transformPoint } from "../geometry/linalg.ts";
@@ -61,7 +64,8 @@ export interface SwMeasureContext {
   mode?: SwMeasureMode;
 }
 
-const ARC_KINDS = new Set(["angle"]);
+/** Kinds of a shortest distance between skew lines or axes. */
+const SKEW_KINDS: ReadonlySet<SwMeasureKind> = new Set(["skew-distance", "axis-skew-distance", "edge-skew-distance"]);
 
 const faceVertices = (mesh: SwMesh, face: number, m: ArrayLike<number> | undefined): Vec3[] => {
   const r = mesh.faceRanges?.[face];
@@ -153,7 +157,7 @@ export const primaryDimension = (
 ): { item: SwMeasureItem; dimension?: SwDimension } | null => {
   if (pick.kind === "point") return null;
   const m = pick.matrix ?? pick.mesh.matrix;
-  const find = (kind: string) => desc.items.find((x) => x.kind === kind);
+  const find = (kind: SwMeasureKind) => desc.items.find((x) => x.kind === kind);
   const line = (item: SwMeasureItem, from: Vec3, to: Vec3, at: "mid" | "end" = "mid") => {
     const it = { ...item, from, to };
     return { item: it, dimension: { kind: "line" as const, item: it, from, to, at } };
@@ -165,8 +169,7 @@ export const primaryDimension = (
     const full = !find("arc-angle");
     if (full) {
       const u = across(desc.axis, viewDir);
-      const label = pick.kind === "face" && desc.label.includes("hole") ? "Hole diameter" : "Diameter";
-      return line({ kind: "diameter", label, value: 2 * r, unit: "mm" }, sub(desc.center, scale(u, r)), add(desc.center, scale(u, r)));
+      return line(measureItem(desc.shape === "hole" ? "hole-diameter" : "diameter", 2 * r), sub(desc.center, scale(u, r)), add(desc.center, scale(u, r)));
     }
     // Arc or partial cylinder: radius towards the middle of the element.
     let mid: Vec3 | undefined;
@@ -176,28 +179,28 @@ export const primaryDimension = (
     let dir = mid ? sub(mid, desc.center) : across(a, viewDir);
     dir = sub(dir, scale(a, dot(dir, a)));
     dir = length(dir) > 1e-9 ? normalize(dir) : across(a, viewDir);
-    return line({ kind: "radius", label: "Radius", value: r, unit: "mm" }, desc.center, add(desc.center, scale(dir, r)), "end");
+    return line(measureItem("radius", r), desc.center, add(desc.center, scale(dir, r)), "end");
   }
   if (pick.kind === "face" && desc.type === "sphere" && desc.center) {
-    const r = find("radius")!.value;
+    const r = find("sphere-radius")!.value;
     const c = mean(faceVertices(pick.mesh, pick.face, m));
     const d = sub(c, desc.center);
     const dir = length(d) > 1e-9 ? normalize(d) : across([0, 0, 1], viewDir);
-    return line({ kind: "sphere-radius", label: "Sphere radius", value: r, unit: "mm" }, desc.center, add(desc.center, scale(dir, r)), "end");
+    return line(measureItem("sphere-radius", r), desc.center, add(desc.center, scale(dir, r)), "end");
   }
   if (pick.kind === "face" && desc.type === "cone") {
     const h = find("half-angle");
-    return h ? { item: { kind: "cone-angle", label: "Opening angle", value: 2 * h.value, unit: "deg" } } : null;
+    return h ? { item: measureItem("cone-angle", 2 * h.value, "deg") } : null;
   }
   if (pick.kind === "edge" && desc.type === "line") {
     const info = pick.mesh.edgeRanges?.[pick.edge]?.info;
-    const len = find("length")!;
-    if (info?.type === "line") return line({ ...len, label: "Edge length" }, transformPoint(m, info.start), transformPoint(m, info.end));
+    const len = find("edge-length")!;
+    if (info?.type === "line") return line(len, transformPoint(m, info.start), transformPoint(m, info.end));
     return { item: len };
   }
   if (pick.kind === "edge" && desc.type === "curve") {
-    const len = find("length");
-    return len ? { item: { ...len, label: "Curve length" } } : null;
+    const len = find("curve-length");
+    return len ? { item: len } : null;
   }
   if (pick.kind === "face" && desc.type === "plane" && desc.point && desc.normal) {
     const opp = oppositePlane(pick.mesh, pick.face, m);
@@ -205,8 +208,8 @@ export const primaryDimension = (
     const to = sub(desc.point, scale(desc.normal, opp.distance));
     return line(
       opp.overlap
-        ? { kind: "wall-thickness", label: "Wall thickness", value: opp.distance, unit: "mm" }
-        : { kind: "parallel-distance", label: "Distance to the next parallel face", value: opp.distance, unit: "mm" },
+        ? measureItem("wall-thickness", opp.distance)
+        : measureItem("parallel-distance", opp.distance),
       desc.point,
       to,
     );
@@ -246,9 +249,9 @@ export const computeMeasurement = (picks: SwViewerPick[], ctx: SwMeasureContext 
     if (pts.every((p): p is Vec3 => !!p)) {
       const g = angle3(pts[0], pts[1], pts[2]);
       if (isArc(g)) {
-        const item: SwMeasureItem = { kind: "angle", label: "Angle (at point 2)", value: g.deg, unit: "deg" };
+        const item = measureItem("three-point-angle", g.deg, "deg");
         out.primary = item;
-        out.items = [item, { kind: "supplementary-angle", label: "Supplementary angle", value: 180 - g.deg, unit: "deg" }];
+        out.items = [item, measureItem("supplementary-angle", 180 - g.deg, "deg")];
         out.dimensions.push({ kind: "angle", item, arc: g });
       }
     }
@@ -259,15 +262,16 @@ export const computeMeasurement = (picks: SwViewerPick[], ctx: SwMeasureContext 
   let items = measurePair(a, b);
   const g = angleBetween(a, b);
   if (isArc(g)) {
-    const item: SwMeasureItem = { kind: "angle", label: "Angle", value: g.deg, unit: "deg" };
-    items = [item, { kind: "supplementary-angle", label: "Supplementary angle", value: 180 - g.deg, unit: "deg" }, ...items.filter((x) => !ARC_KINDS.has(x.kind))];
-    if (g.skew !== undefined && g.skew > 1e-6 && !items.some((x) => x.kind === "skew-distance")) {
-      items.push({ kind: "skew-distance", label: "Shortest distance (skew)", value: g.skew, unit: "mm" });
+    const item = measureItem("angle", g.deg, "deg");
+    // The arc's angle replaces the pair's own (acute) angle values.
+    items = [item, measureItem("supplementary-angle", 180 - g.deg, "deg"), ...items.filter((x) => x.unit !== "deg")];
+    if (g.skew !== undefined && g.skew > 1e-6 && !items.some((x) => SKEW_KINDS.has(x.kind))) {
+      items.push(measureItem("skew-distance", g.skew));
     }
     out.dimensions.push({ kind: "angle", item, arc: g });
     out.primary = item;
   } else if (g?.parallel && ctx.mode === "angle") {
-    items = [{ kind: "angle", label: "Angle (parallel)", value: 0, unit: "deg" }, ...items];
+    items = [measureItem("parallel-angle", 0, "deg"), ...items];
     out.primary = items[0];
   }
   if (ctx.mode !== "angle" || !out.dimensions.length) {
@@ -292,7 +296,12 @@ export interface SwFormatOptions {
   digits?: number;
   /** Decimals for angles (default 2). */
   angleDigits?: number;
+  /** Unit texts in tables (default `mm`, `mm²`, `°`); degrees follow the number without a space. */
+  units?: Partial<Record<SwMeasureUnit, string>>;
 }
+
+/** Unit texts of `formatMeasureValue`. */
+export const DEFAULT_UNIT_LABELS: Readonly<Record<SwMeasureUnit, string>> = { mm: "mm", "mm²": "mm²", deg: "°" };
 
 /** Fixed-decimals number; values that round to zero print as 0 (no `-0.000`). */
 export const formatNumber = (x: number, digits = 3, locale = "en-US") => {
@@ -301,8 +310,9 @@ export const formatNumber = (x: number, digits = 3, locale = "en-US") => {
 };
 
 /** Symbol in front of a dimension value, by item kind. */
-export const DIMENSION_PREFIX: Readonly<Record<string, string>> = {
+export const DIMENSION_PREFIX: Readonly<Partial<Record<SwMeasureKind, string>>> = {
   diameter: "Ø",
+  "hole-diameter": "Ø",
   radius: "R",
   "sphere-radius": "SR",
 };
@@ -313,12 +323,13 @@ const number = (item: SwMeasureItem, o: SwFormatOptions) =>
 /** Value with unit for tables, e.g. `20.000 mm`, `≈ 12.000 mm²`, `90.00°`. */
 export const formatMeasureValue = (item: SwMeasureItem, o: SwFormatOptions = {}) => {
   const n = `${DIMENSION_PREFIX[item.kind] ?? ""}${number(item, o)}`;
-  const v = item.unit === "deg" ? `${n}°` : `${n} ${item.unit}`;
+  const unit = o.units?.[item.unit] ?? DEFAULT_UNIT_LABELS[item.unit];
+  const v = item.unit === "deg" ? `${n}${unit}` : `${n} ${unit}`;
   return item.approx ? `≈ ${v}` : v;
 };
 
 /** Short text on a dimension label, e.g. `Ø20.000`, `R5.000`, `45.00°`. */
 export const formatDimension = (item: SwMeasureItem, o: SwFormatOptions = {}) => {
   const n = `${DIMENSION_PREFIX[item.kind] ?? ""}${number(item, o)}`;
-  return item.unit === "deg" ? `${n}°` : n;
+  return item.unit === "deg" ? `${n}${o.units?.deg ?? DEFAULT_UNIT_LABELS.deg}` : n;
 };

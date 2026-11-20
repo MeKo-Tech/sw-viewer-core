@@ -29,6 +29,7 @@ export {
 } from "./section.ts";
 export {
   computeMeasurement,
+  DEFAULT_UNIT_LABELS,
   DIMENSION_PREFIX,
   formatDimension,
   formatMeasureValue,

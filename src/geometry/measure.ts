@@ -33,11 +33,154 @@ export type SwPick =
 
 export type SwMeasureUnit = "mm" | "mm²" | "deg";
 
+/**
+ * Every kind of measured value, one per meaning. Apps translate by kind, so a value
+ * never shares its kind with a different one (a hole diameter is not a diameter, the
+ * distance of two parallel planes is not the distance of two points).
+ */
+export const SW_MEASURE_KINDS = [
+  // one element
+  "diameter",
+  "hole-diameter",
+  "radius",
+  "sphere-radius",
+  "arc-angle",
+  "height",
+  "half-angle",
+  "cone-angle",
+  "area",
+  "edge-length",
+  "curve-length",
+  "arc-length",
+  "wall-thickness",
+  "parallel-distance",
+  // angles between two elements, or at the middle of three points
+  "angle",
+  "three-point-angle",
+  "parallel-angle",
+  "supplementary-angle",
+  "plane-angle",
+  "edge-angle",
+  "axis-angle",
+  "edge-plane-angle",
+  "axis-plane-angle",
+  // distances between two elements
+  "distance",
+  "dx",
+  "dy",
+  "dz",
+  "plane-distance",
+  "center-distance",
+  "axis-distance",
+  "edge-distance",
+  "skew-distance",
+  "axis-skew-distance",
+  "edge-skew-distance",
+  "axis-plane",
+  "center-plane",
+  "circle-center-plane",
+  "edge-plane",
+  "endpoint-plane",
+  "point-plane",
+  "point-axis",
+  "point-line",
+  "point-surface",
+  "point-sphere",
+  "point-sphere-center",
+  "point-circle-center",
+  "point-circle",
+  "point-circle-axis",
+  "point-edge",
+  "point-face",
+  "min-distance",
+] as const;
+
+/** Machine-readable id of a measured value; see `SW_MEASURE_KINDS`. */
+export type SwMeasureKind = (typeof SW_MEASURE_KINDS)[number];
+
+/** English text per measured value: the `label` hint of each item. */
+export const defaultMeasureItemLabels: Readonly<Record<SwMeasureKind, string>> = {
+  diameter: "Diameter",
+  "hole-diameter": "Hole diameter",
+  radius: "Radius",
+  "sphere-radius": "Sphere radius",
+  "arc-angle": "Arc angle",
+  height: "Length (axial)",
+  "half-angle": "Half angle",
+  "cone-angle": "Opening angle",
+  area: "Area",
+  "edge-length": "Edge length",
+  "curve-length": "Curve length",
+  "arc-length": "Arc length",
+  "wall-thickness": "Wall thickness",
+  "parallel-distance": "Distance to the next parallel face",
+  angle: "Angle",
+  "three-point-angle": "Angle (at point 2)",
+  "parallel-angle": "Angle (parallel)",
+  "supplementary-angle": "Supplementary angle",
+  "plane-angle": "Angle between planes",
+  "edge-angle": "Angle between edges",
+  "axis-angle": "Angle between axes",
+  "edge-plane-angle": "Angle edge – plane",
+  "axis-plane-angle": "Angle axis – plane",
+  distance: "Distance",
+  dx: "dX",
+  dy: "dY",
+  dz: "dZ",
+  "plane-distance": "Distance (parallel)",
+  "center-distance": "Centre distance",
+  "axis-distance": "Axis distance",
+  "edge-distance": "Distance between edges (parallel)",
+  "skew-distance": "Shortest distance (skew)",
+  "axis-skew-distance": "Shortest axis distance",
+  "edge-skew-distance": "Shortest distance (extended edges)",
+  "axis-plane": "Distance axis – plane",
+  "center-plane": "Distance centre – plane",
+  "circle-center-plane": "Distance circle centre – plane",
+  "edge-plane": "Distance edge – plane",
+  "endpoint-plane": "Distance nearest end point – plane",
+  "point-plane": "Distance point – plane",
+  "point-axis": "Distance point – axis",
+  "point-line": "Distance point – line",
+  "point-surface": "Distance point – surface",
+  "point-sphere": "Distance point – sphere",
+  "point-sphere-center": "Distance point – sphere centre",
+  "point-circle-center": "Distance point – circle centre",
+  "point-circle": "Distance point – circle",
+  "point-circle-axis": "Distance point – circle axis",
+  "point-edge": "Distance point – edge",
+  "point-face": "Distance point – face",
+  "min-distance": "Min. distance (≈, mesh)",
+};
+
+/**
+ * What a picked element is, one value per meaning: the face and edge types, with
+ * inner cylinders as `hole` and open circular edges as `arc`.
+ */
+export const SW_SHAPES = ["point", "plane", "cylinder", "hole", "cone", "sphere", "freeform", "line", "circle", "arc", "curve"] as const;
+
+export type SwShape = (typeof SW_SHAPES)[number];
+
+/** English text per shape: the `label` hint of each description. */
+export const defaultShapeLabels: Readonly<Record<SwShape, string>> = {
+  point: "Point",
+  plane: "Plane",
+  cylinder: "Cylinder",
+  hole: "Cylinder (hole)",
+  cone: "Cone",
+  sphere: "Sphere",
+  freeform: "Freeform surface",
+  line: "Line",
+  circle: "Circle",
+  arc: "Arc",
+  curve: "Curve",
+};
+
 /** One measured value. `from`/`to` (world space) is the dimension line to draw, if any. */
 export interface SwMeasureItem {
-  /** Machine-readable id, e.g. `distance`, `axis-distance`, `angle`, `diameter`. */
-  kind: string;
-  /** English label hint; apps translate by `kind`. */
+  /** Machine-readable id; translate by it (`Record<SwMeasureKind, string>`). */
+  kind: SwMeasureKind;
+  /** English text of the kind (`defaultMeasureItemLabels[kind]`). */
   label: string;
   value: number;
   unit: SwMeasureUnit;
@@ -51,8 +194,14 @@ export interface SwMeasureItem {
 export interface SwDescription {
   kind: SwPick["kind"];
   type: SwFaceInfo["type"] | SwEdgeInfo["type"] | "point";
-  /** English label hint, e.g. `Cylinder (hole)`. */
+  /** What the element is, for apps: like `type`, plus `hole` and `arc`. */
+  shape: SwShape;
+  /** English text of the shape (`defaultShapeLabels[shape]`), e.g. `Cylinder (hole)`. */
   label: string;
+  /** Cylinders and spheres: true for a hole or cavity (material outside). */
+  inner?: boolean;
+  /** Cylinder faces and circular edges: true for a full revolution, false for an arc. */
+  full?: boolean;
   items: SwMeasureItem[];
   point?: Vec3;
   center?: Vec3;
@@ -277,50 +426,58 @@ const closestPairs = (A: Vec3[], B: Vec3[]) => {
 
 // ---------- describe ----------
 
-const item = (kind: string, label: string, value: number, unit: SwMeasureUnit = "mm", extra: Partial<SwMeasureItem> = {}): SwMeasureItem => ({
+/** A measured value labelled with the English text of its kind. */
+export const measureItem = (kind: SwMeasureKind, value: number, unit: SwMeasureUnit = "mm", extra: Partial<SwMeasureItem> = {}): SwMeasureItem => ({
   kind,
-  label,
+  label: defaultMeasureItemLabels[kind],
   value,
   unit,
   ...extra,
 });
+const item = measureItem;
 
-const FACE_LABEL: Record<FaceType, string> = {
-  plane: "Plane",
-  cylinder: "Cylinder",
-  cone: "Cone",
-  sphere: "Sphere",
-  other: "Freeform surface",
+const FACE_SHAPE: Record<FaceType, SwShape> = {
+  plane: "plane",
+  cylinder: "cylinder",
+  cone: "cone",
+  sphere: "sphere",
+  other: "freeform",
 };
 
 /** Type and dimensions of one picked element (world space). */
 export const describe = (pick: SwPick): SwDescription => {
   const e = toEnt(pick);
   const items: SwMeasureItem[] = [];
+  const shaped = (shape: SwShape) => ({ shape, label: defaultShapeLabels[shape] });
   if (e.kind === "point") {
-    return { kind: "point", type: "point", label: "Point", items, point: e.p };
+    return { kind: "point", type: "point", ...shaped("point"), items, point: e.p };
   }
   if (e.kind === "face") {
-    let label = FACE_LABEL[e.type as FaceType];
+    let shape = FACE_SHAPE[e.type as FaceType];
+    const flags: Pick<SwDescription, "inner" | "full"> = {};
     if (e.type === "cylinder") {
-      if (e.inner) label = "Cylinder (hole)";
-      items.push(item("diameter", "Diameter", 2 * e.radius!), item("radius", "Radius", e.radius!));
-      if (!e.full) items.push(item("arc-angle", "Arc angle ≈", e.arcDeg!, "deg", { approx: true }));
-      items.push(item("height", "Length (axial)", e.height!));
+      if (e.inner) shape = "hole";
+      flags.inner = !!e.inner;
+      flags.full = !!e.full;
+      items.push(item(e.inner ? "hole-diameter" : "diameter", 2 * e.radius!), item("radius", e.radius!));
+      if (!e.full) items.push(item("arc-angle", e.arcDeg!, "deg", { approx: true }));
+      items.push(item("height", e.height!));
     }
-    if (e.type === "sphere") items.push(item("radius", "Sphere radius", e.radius!));
-    if (e.type === "cone") items.push(item("half-angle", "Half angle", e.halfAngle!, "deg"));
-    items.push(item("area", "Area", e.area!, "mm²"));
-    return { kind: "face", type: e.type, label, items, point: e.point, center: e.center, axis: e.axis, normal: e.normal };
+    if (e.type === "sphere") {
+      flags.inner = !!e.inner;
+      items.push(item("sphere-radius", e.radius!));
+    }
+    if (e.type === "cone") items.push(item("half-angle", e.halfAngle!, "deg"));
+    items.push(item("area", e.area!, "mm²"));
+    return { kind: "face", type: e.type, ...shaped(shape), ...flags, items, point: e.point, center: e.center, axis: e.axis, normal: e.normal };
   }
-  const labels: Record<EdgeType, string> = { line: "Line", circle: e.full ? "Circle" : "Arc", curve: "Curve" };
   if (e.type === "circle") {
-    items.push(item("diameter", "Diameter", 2 * e.radius!), item("radius", "Radius", e.radius!));
-    if (!e.full) items.push(item("arc-angle", "Arc angle", e.angle!, "deg"), item("length", "Arc length", e.length!));
-  } else {
-    items.push(item("length", "Length", e.length!));
+    items.push(item("diameter", 2 * e.radius!), item("radius", e.radius!));
+    if (!e.full) items.push(item("arc-angle", e.angle!, "deg"), item("arc-length", e.length!));
+    return { kind: "edge", type: e.type, ...shaped(e.full ? "circle" : "arc"), full: !!e.full, items, center: e.center, axis: e.normal };
   }
-  return { kind: "edge", type: e.type, label: labels[e.type as EdgeType], items, center: e.center, axis: e.normal };
+  items.push(item(e.type === "line" ? "edge-length" : "curve-length", e.length!));
+  return { kind: "edge", type: e.type, ...shaped(e.type === "line" ? "line" : "curve"), items, center: e.center, axis: e.normal };
 };
 
 // ---------- measure a pair ----------
@@ -359,23 +516,23 @@ export const measurePair = (pa: SwPick, pb: SwPick): SwMeasureItem[] => {
     if (other.type === "cylinder") {
       const q = projLine(p, other.center!, other.axis!);
       const d = distance(p, q);
-      out.push(item("point-axis", "Distance point – axis", d, "mm", { from: p, to: q }));
+      out.push(item("point-axis", d, "mm", { from: p, to: q }));
       const s = d > 1e-9 ? add(q, scale(sub(p, q), other.radius! / d)) : undefined;
-      out.push(item("point-surface", "Distance point – surface", Math.abs(d - other.radius!), "mm", s && { from: p, to: s }));
+      out.push(item("point-surface", Math.abs(d - other.radius!), "mm", s && { from: p, to: s }));
     } else if (other.type === "sphere") {
       const d = distance(p, other.center!);
-      out.push(item("point-center", "Distance point – sphere centre", d, "mm", { from: p, to: other.center }));
+      out.push(item("point-sphere-center", d, "mm", { from: p, to: other.center }));
       const s = d > 1e-9 ? add(other.center!, scale(sub(p, other.center!), other.radius! / d)) : undefined;
-      out.push(item("point-surface", "Distance point – sphere", Math.abs(d - other.radius!), "mm", s && { from: p, to: s }));
+      out.push(item("point-sphere", Math.abs(d - other.radius!), "mm", s && { from: p, to: s }));
     } else {
       const c = closestOnTris(p, other.tris!());
-      out.push(item("point-face", "Distance point – face", c.distance, "mm", c.distance > 1e-6 ? { from: p, to: c.point, approx: true } : { approx: true }));
+      out.push(item("point-face", c.distance, "mm", c.distance > 1e-6 ? { from: p, to: c.point, approx: true } : { approx: true }));
     }
     return out;
   }
   if (pointEnt && other.kind === "edge" && other.type === "curve") {
     const c = closestOnPolyline(pointEnt.p!, other.pts());
-    out.push(item("point-edge", "Distance point – edge", c.distance, "mm", c.distance > 1e-6 ? { from: pointEnt.p, to: c.point } : {}));
+    out.push(item("point-edge", c.distance, "mm", c.distance > 1e-6 ? { from: pointEnt.p, to: c.point } : {}));
     return out;
   }
   if (pointEnt && other.kind === "edge" && other.type === "circle") {
@@ -385,10 +542,10 @@ export const measurePair = (pa: SwPick, pb: SwPick): SwMeasureItem[] => {
     const h = dot(sub(p, c), n);
     const radial = sub(sub(p, c), scale(n, h));
     const rad = length(radial);
-    out.push(item("point-center", "Distance point – circle centre", distance(p, c), "mm", { from: p, to: c }));
+    out.push(item("point-circle-center", distance(p, c), "mm", { from: p, to: c }));
     const onCircle = rad > 1e-9 ? add(c, scale(radial, other.radius! / rad)) : undefined;
-    out.push(item("point-circle", "Distance point – circle", Math.hypot(h, rad - other.radius!), "mm", onCircle && { from: p, to: onCircle }));
-    out.push(item("point-circle-axis", "Distance point – circle axis", rad, "mm", { from: p, to: add(c, scale(n, h)) }));
+    out.push(item("point-circle", Math.hypot(h, rad - other.radius!), "mm", onCircle && { from: p, to: onCircle }));
+    out.push(item("point-circle-axis", rad, "mm", { from: p, to: add(c, scale(n, h)) }));
     return out;
   }
 
@@ -396,9 +553,9 @@ export const measurePair = (pa: SwPick, pb: SwPick): SwMeasureItem[] => {
     const c = Math.abs(dot(P1.n, P2.n));
     if (c > PAR) {
       const d = dot(sub(P2.o, P1.o), P1.n);
-      out.push(item("distance", "Distance (parallel)", Math.abs(d), "mm", { from: sub(P2.o, scale(P1.n, d)), to: P2.o }));
+      out.push(item("plane-distance", Math.abs(d), "mm", { from: sub(P2.o, scale(P1.n, d)), to: P2.o }));
     } else {
-      out.push(item("angle", "Angle", acosDeg(c), "deg"));
+      out.push(item("plane-angle", acosDeg(c), "deg"));
     }
   } else if ((P1 && X2) || (P2 && X1)) {
     const P = (P1 ?? P2)!;
@@ -407,55 +564,55 @@ export const measurePair = (pa: SwPick, pb: SwPick): SwMeasureItem[] => {
     const c = Math.abs(dot(P.n, X.dir));
     if (E.kind === "edge" && E.type === "circle") {
       const d = dot(sub(E.center!, P.o), P.n);
-      out.push(item("center-plane", "Distance circle centre – plane", Math.abs(d), "mm", { from: E.center, to: sub(E.center!, scale(P.n, d)) }));
+      out.push(item("circle-center-plane", Math.abs(d), "mm", { from: E.center, to: sub(E.center!, scale(P.n, d)) }));
     } else if (E.kind === "edge" && E.type === "line") {
       const da = dot(sub(E.start!, P.o), P.n);
       const db = dot(sub(E.end!, P.o), P.n);
       if (c < 1e-6) {
-        out.push(item("edge-plane", "Distance edge – plane", Math.abs(da), "mm", { from: E.start, to: sub(E.start!, scale(P.n, da)) }));
+        out.push(item("edge-plane", Math.abs(da), "mm", { from: E.start, to: sub(E.start!, scale(P.n, da)) }));
       } else {
-        out.push(item("angle", "Angle edge – plane", 90 - acosDeg(c), "deg"));
+        out.push(item("edge-plane-angle", 90 - acosDeg(c), "deg"));
         const [q, dq] = Math.abs(da) < Math.abs(db) ? [E.start!, da] : [E.end!, db];
-        out.push(item("endpoint-plane", "Distance nearest end point – plane", Math.abs(dq), "mm", Math.abs(dq) > 1e-6 ? { from: q, to: sub(q, scale(P.n, dq)) } : {}));
+        out.push(item("endpoint-plane", Math.abs(dq), "mm", Math.abs(dq) > 1e-6 ? { from: q, to: sub(q, scale(P.n, dq)) } : {}));
       }
     } else if (c < 1 - PAR) {
       const d = dot(sub(X.o, P.o), P.n);
-      out.push(item("axis-plane", "Distance axis – plane", Math.abs(d), "mm", { from: X.o, to: sub(X.o, scale(P.n, d)) }));
+      out.push(item("axis-plane", Math.abs(d), "mm", { from: X.o, to: sub(X.o, scale(P.n, d)) }));
     } else {
-      if (c < PAR) out.push(item("angle", "Angle axis – plane", 90 - acosDeg(c), "deg"));
+      if (c < PAR) out.push(item("axis-plane-angle", 90 - acosDeg(c), "deg"));
       const d = dot(sub(X.o, P.o), P.n);
-      out.push(item("center-plane", "Distance centre – plane", Math.abs(d), "mm", { from: X.o, to: sub(X.o, scale(P.n, d)) }));
+      out.push(item("center-plane", Math.abs(d), "mm", { from: X.o, to: sub(X.o, scale(P.n, d)) }));
     }
   } else if ((P1 && isPt(b)) || (P2 && isPt(a))) {
     const P = (P1 ?? P2)!;
     const p = ptOf(P1 ? b : a);
     const d = dot(sub(p, P.o), P.n);
-    out.push(item("point-plane", "Distance point – plane", Math.abs(d), "mm", { from: p, to: sub(p, scale(P.n, d)) }));
+    out.push(item("point-plane", Math.abs(d), "mm", { from: p, to: sub(p, scale(P.n, d)) }));
   } else if (X1 && X2 && !(isPt(a) && isPt(b) && (a.kind === "point" || b.kind === "point"))) {
     const c = Math.abs(dot(X1.dir, X2.dir));
     const bothLines = a.type === "line" && b.type === "line";
     if (c > PAR) {
       const q = projLine(X2.o, X1.o, X1.dir);
       const d = distance(X2.o, q);
-      out.push(item(bothLines ? "edge-distance" : "axis-distance", bothLines ? "Distance between edges (parallel)" : "Axis distance", d, "mm", { from: q, to: X2.o }));
+      out.push(item(bothLines ? "edge-distance" : "axis-distance", d, "mm", { from: q, to: X2.o }));
     } else {
-      out.push(item("angle", bothLines ? "Angle between edges" : "Angle between axes", acosDeg(c), "deg"));
+      out.push(item(bothLines ? "edge-angle" : "axis-angle", acosDeg(c), "deg"));
       const w = normalize(cross(X1.dir, X2.dir));
-      out.push(item("skew-distance", bothLines ? "Shortest distance (extended edges)" : "Shortest axis distance", Math.abs(dot(sub(X2.o, X1.o), w)), "mm"));
+      out.push(item(bothLines ? "edge-skew-distance" : "axis-skew-distance", Math.abs(dot(sub(X2.o, X1.o), w)), "mm"));
     }
     if (isPt(a) && isPt(b)) {
       const d = distance(ptOf(a), ptOf(b));
-      out.push(item("center-distance", "Centre distance", d, "mm", { from: ptOf(a), to: ptOf(b) }));
+      out.push(item("center-distance", d, "mm", { from: ptOf(a), to: ptOf(b) }));
     }
   } else if (isPt(a) && isPt(b)) {
     const p = ptOf(a);
     const q = ptOf(b);
     const dd = sub(q, p);
     out.push(
-      item("distance", "Distance", length(dd), "mm", { from: p, to: q }),
-      item("dx", "dX", Math.abs(dd[0])),
-      item("dy", "dY", Math.abs(dd[1])),
-      item("dz", "dZ", Math.abs(dd[2]))
+      item("distance", length(dd), "mm", { from: p, to: q }),
+      item("dx", Math.abs(dd[0])),
+      item("dy", Math.abs(dd[1])),
+      item("dz", Math.abs(dd[2]))
     );
   } else if ((X1 && isPt(b)) || (X2 && isPt(a))) {
     const X = (X1 ?? X2)!;
@@ -463,14 +620,14 @@ export const measurePair = (pa: SwPick, pb: SwPick): SwMeasureItem[] => {
     const p = ptOf(X1 ? b : a);
     const q = projLine(p, X.o, X.dir);
     const line = owner.kind === "edge" && owner.type === "line";
-    out.push(item(line ? "point-line" : "point-axis", line ? "Distance point – line" : "Distance point – axis", distance(p, q), "mm", { from: p, to: q }));
+    out.push(item(line ? "point-line" : "point-axis", distance(p, q), "mm", { from: p, to: q }));
   }
 
   const hasDistance = out.some((x) => x.unit === "mm");
   if (!out.length || !hasDistance) {
     const cp = closestPairs(a.pts(), b.pts());
     if (!out.length || cp.d > 1e-6) {
-      out.push(item("min-distance", "Min. distance (≈, mesh)", cp.d, "mm", { approx: true, ...(cp.d > 1e-6 ? { from: cp.pa, to: cp.pb } : {}) }));
+      out.push(item("min-distance", cp.d, "mm", { approx: true, ...(cp.d > 1e-6 ? { from: cp.pa, to: cp.pb } : {}) }));
     }
   }
   return out;

@@ -109,11 +109,11 @@ describe("analyzeMesh: cube", () => {
     const bottom = { kind: "face" as const, mesh: m, face: planeFace(m, 1, -1) };
     const side = { kind: "face" as const, mesh: m, face: planeFace(m, 0, 1) };
     const [d] = measurePair(top, bottom);
-    assert.equal(d.kind, "distance");
+    assert.equal(d.kind, "plane-distance");
     near(d.value, 100, 1e-9);
     assert.ok(d.from && d.to);
     const [a] = measurePair(top, side);
-    assert.equal(a.kind, "angle");
+    assert.equal(a.kind, "plane-angle");
     near(a.value, 90, 1e-9);
     const arc = angleBetween(top, side);
     assert.ok(arc && !arc.parallel);

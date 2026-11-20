@@ -3,7 +3,7 @@
 
 import type { SwPinnedMeasurement } from "../three/measure.ts";
 import { formatMeasureValue, type SwMeasureMode, type SwMeasurement } from "../three/measureModel.ts";
-import type { SwMeasureItem } from "../geometry/measure.ts";
+import type { SwDescription, SwMeasureItem } from "../geometry/measure.ts";
 import type { SwComponentNode } from "../types.ts";
 import { flattenComponents } from "../three/components.ts";
 import { cx } from "./helpers.ts";
@@ -44,21 +44,24 @@ export function SwMeasurePanel({
   className,
 }: SwMeasurePanelProps) {
   const L = mergeLabels(defaultMeasurePanelLabels, partial);
-  const fmt = formatValue ?? ((item: SwMeasureItem) => formatMeasureValue(item, { locale }));
+  const fmt = formatValue ?? ((item: SwMeasureItem) => formatMeasureValue(item, { locale, units: L.units }));
+  // A kind or shape missing from the labels (e.g. labels typed against an older version) shows the English hint.
+  const itemLabel = (it: SwMeasureItem) => L.items[it.kind] ?? it.label;
+  const shapeLabel = (d: SwDescription) => L.shapes[d.shape] ?? d.label;
   const names = new Map(flattenComponents(components).map((n) => [n.id, n.name]));
   const title = (x: SwMeasurement) => {
-    if (x.picks.length === 1) return L.description(x.descriptions[0]);
-    return x.primary ? L.item(x.primary) : x.descriptions.map((d) => L.description(d)).join(" – ");
+    if (x.picks.length === 1) return shapeLabel(x.descriptions[0]);
+    return x.primary ? itemLabel(x.primary) : x.descriptions.map((d) => shapeLabel(d)).join(" – ");
   };
 
   const rows: [string, string][] = [];
   if (m) {
-    for (const it of m.items) if (it !== m.primary) rows.push([L.item(it), fmt(it)]);
+    for (const it of m.items) if (it !== m.primary) rows.push([itemLabel(it), fmt(it)]);
     if (m.picks.length === 1) {
       const p = m.picks[0];
       if (p.kind === "point" && p.snap) rows.push([L.snap, L.snapKinds[p.snap]]);
     } else {
-      m.picks.forEach((p, i) => rows.push([L.element(i + 1), L.description(m.descriptions[i])]));
+      m.picks.forEach((p, i) => rows.push([L.element(i + 1), shapeLabel(m.descriptions[i])]));
     }
     const comps = [...new Set(m.picks.map((p) => p.componentId).filter((c): c is string => !!c))];
     if (comps.length) rows.push([L.component, comps.map((c) => names.get(c) ?? c).join(", ")]);
@@ -80,7 +83,7 @@ export function SwMeasurePanel({
         {m ? (
           <>
             <div className="sw-primary">
-              <span>{m.primary && m.picks.length === 1 ? L.item(m.primary) : title(m)}</span>
+              <span>{m.primary && m.picks.length === 1 ? itemLabel(m.primary) : title(m)}</span>
               {m.primary ? <b>{fmt(m.primary)}</b> : null}
             </div>
             {m.picks.length === 1 && m.primary ? <div className="sw-hint">{title(m)}</div> : null}

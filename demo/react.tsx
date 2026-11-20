@@ -40,8 +40,18 @@ const de: DeepPartial<SwViewerPanelLabels> = {
     noPins: "Noch keine Maße behalten.",
     clear: "Alles löschen",
     hints: { auto: "Punkt, Kante oder Fläche anklicken – ein zweites Element ergibt Abstand oder Winkel." },
-    // Measured values carry machine kinds; translate the ones you need, fall back to the English hint.
-    item: (item) => ({ diameter: "Durchmesser", radius: "Radius", area: "Fläche", length: "Länge", distance: "Abstand", angle: "Winkel" })[item.kind] ?? item.label,
+    // One text per measured value kind; kinds left out keep the English default.
+    items: {
+      diameter: "Durchmesser",
+      "hole-diameter": "Bohrungsdurchmesser",
+      radius: "Radius",
+      area: "Fläche",
+      "edge-length": "Kantenlänge",
+      distance: "Abstand",
+      "plane-distance": "Abstand (parallel)",
+      angle: "Winkel",
+    },
+    shapes: { plane: "Ebene", cylinder: "Zylinder", hole: "Bohrung", line: "Linie", circle: "Kreis", arc: "Bogen", point: "Punkt" },
   },
   info: {
     title: "Bauteil",

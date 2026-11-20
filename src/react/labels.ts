@@ -2,8 +2,14 @@
 // a `labels` prop that is merged over these English defaults, so apps translate by
 // passing their own objects. Pure data, no React.
 
-import type { SwDescription, SwMeasureItem } from "../geometry/measure.ts";
-import type { SwMeasureMode, SwSnapKind } from "../three/measureModel.ts";
+import {
+  defaultMeasureItemLabels,
+  defaultShapeLabels,
+  type SwMeasureKind,
+  type SwMeasureUnit,
+  type SwShape,
+} from "../geometry/measure.ts";
+import { DEFAULT_UNIT_LABELS, type SwMeasureMode, type SwSnapKind } from "../three/measureModel.ts";
 import type { SwAxis } from "../three/section.ts";
 import type { SwStandardView, SwViewCubeLabels } from "../three/viewCube.ts";
 import { defaultViewCubeLabels } from "../three/viewCube.ts";
@@ -145,10 +151,12 @@ export interface SwMeasurePanelLabels {
   snap: string;
   snapKinds: Record<SwSnapKind, string>;
   element: (index: number) => string;
-  /** Row label of a measured value; translate by `item.kind` (default: the English hint). */
-  item: (item: SwMeasureItem) => string;
-  /** Title of a picked element; translate by `kind`/`type` (default: the English hint). */
-  description: (d: SwDescription) => string;
+  /** Row label per measured value kind (`SwMeasureItem.kind`). */
+  items: Record<SwMeasureKind, string>;
+  /** Title per picked element shape (`SwDescription.shape`). */
+  shapes: Record<SwShape, string>;
+  /** Unit texts after the values (`°` follows the number without a space). */
+  units: Record<SwMeasureUnit, string>;
 }
 
 export const defaultMeasurePanelLabels: SwMeasurePanelLabels = {
@@ -170,8 +178,9 @@ export const defaultMeasurePanelLabels: SwMeasurePanelLabels = {
   snap: "Snap",
   snapKinds: { corner: "Corner", midpoint: "Edge midpoint", center: "Circle centre", surface: "Point on face" },
   element: (i) => `Element ${i}`,
-  item: (item) => item.label,
-  description: (d) => d.label,
+  items: { ...defaultMeasureItemLabels },
+  shapes: { ...defaultShapeLabels },
+  units: { ...DEFAULT_UNIT_LABELS },
 };
 
 export interface SwSheetsLabels {

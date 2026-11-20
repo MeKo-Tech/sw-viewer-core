@@ -32,6 +32,7 @@ export {
 export { defaultViewCubeLabels, type SwStandardView, type SwViewCubeLabels } from "../three/viewCube.ts";
 export type { SwPinnedMeasurement } from "../three/measure.ts";
 export {
+  DEFAULT_UNIT_LABELS,
   formatDimension,
   formatMeasureValue,
   formatNumber,
@@ -42,5 +43,15 @@ export {
 } from "../three/measureModel.ts";
 export type { SwAxis, SwBox, SwSectionSpec } from "../three/section.ts";
 export { initialHiddenComponents, partColors, setComponentHidden } from "../three/components.ts";
-export type { SwDescription, SwMeasureItem } from "../geometry/measure.ts";
+export {
+  defaultMeasureItemLabels,
+  defaultShapeLabels,
+  SW_MEASURE_KINDS,
+  SW_SHAPES,
+  type SwDescription,
+  type SwMeasureItem,
+  type SwMeasureKind,
+  type SwMeasureUnit,
+  type SwShape,
+} from "../geometry/measure.ts";
 export type { SwComponentNode, SwDocumentKind, SwMesh, SwParseResult, SwSheet } from "../types.ts";

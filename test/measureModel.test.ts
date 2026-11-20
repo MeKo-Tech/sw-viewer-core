@@ -63,7 +63,9 @@ describe("primary dimension", () => {
   it("a hole is labelled as hole diameter", () => {
     const m = analyzed(cylinder(10, 40, 48, true));
     const pick = { kind: "face" as const, mesh: m, face: 0 };
-    assert.equal(primaryDimension(pick, describePick(pick))!.item.label, "Hole diameter");
+    const item = primaryDimension(pick, describePick(pick))!.item;
+    assert.equal(item.kind, "hole-diameter");
+    assert.equal(item.label, "Hole diameter");
   });
 
   it("a plane gets the wall thickness to the opposite face", () => {
@@ -84,6 +86,7 @@ describe("primary dimension", () => {
     const m = analyzed(cube(10));
     const pick = { kind: "edge" as const, mesh: m, edge: 0 };
     const p = primaryDimension(pick, describePick(pick))!;
+    assert.equal(p.item.kind, "edge-length");
     assert.equal(p.item.label, "Edge length");
     near(p.item.value, 10);
   });
@@ -116,7 +119,7 @@ describe("computeMeasurement", () => {
       { kind: "face", mesh: m, face: a },
       { kind: "face", mesh: m, face: b },
     ])!;
-    assert.equal(r.primary?.kind, "distance");
+    assert.equal(r.primary?.kind, "plane-distance");
     near(r.primary!.value, 10);
     assert.equal(r.dimensions[0].kind, "line");
   });
