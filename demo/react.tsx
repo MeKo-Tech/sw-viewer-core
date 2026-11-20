@@ -1,32 +1,81 @@
-// React demo: pick a SolidWorks file and show it with <SwViewer>.
+// React demo: pick a SolidWorks file and show it in <SwViewerPanel> (toolbar, section,
+// measuring, component tree, sheets, info). "Deutsch" shows how an app passes its own labels.
 
-import { StrictMode, useState } from "react";
+import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { type SwParseResult, SwViewer } from "../src/react/index.ts";
+import {
+  type DeepPartial,
+  type SwParseResult,
+  type SwViewerInstance,
+  SwViewerPanel,
+  type SwViewerPanelLabels,
+} from "../src/react/index.ts";
+import "../src/react/sw-viewer.css";
 
 const createWorker = () => new Worker(new URL("../src/worker.ts", import.meta.url), { type: "module" });
 
-type Status = { kind: "idle" } | { kind: "parsing" } | { kind: "done"; result: SwParseResult } | { kind: "error"; message: string };
-
-const statusText = (status: Status): string => {
-  switch (status.kind) {
-    case "idle":
-      return "Keine Datei ausgewählt";
-    case "parsing":
-      return "Wird gelesen …";
-    case "done": {
-      const { kind, meshes, preview } = status.result;
-      if (meshes.length) return `${kind}: ${meshes.length} Mesh(es)`;
-      return preview ? `${kind}: kein Display-Mesh, zeige Vorschaubild` : `${kind}: keine Geometrie gefunden`;
-    }
-    case "error":
-      return `Fehler: ${status.message}`;
-  }
+// Partial German labels: everything not listed keeps the English default.
+const de: DeepPartial<SwViewerPanelLabels> = {
+  toolbar: {
+    edges: "Kanten",
+    measure: "Messen",
+    measureModes: { auto: "Auto", point: "Punkt", edge: "Kante", face: "Fläche", angle: "Winkel" },
+    section: "Schnitt",
+    sectionOff: "Aus",
+    sectionThroughAxis: "Durch Achse",
+    sectionOnFace: "An Fläche",
+    sectionFlip: "Seite",
+    sectionOffset: "Position",
+    sectionAngle: "Drehung",
+    sectionContour: "Kontur",
+    viewNames: { front: "Vorne", top: "Oben", right: "Rechts", iso: "Iso" },
+    resetView: "Einpassen",
+    colorByPart: "Farbe je Teil",
+  },
+  tree: { title: "Komponenten", suppressed: "unterdrückt", count: (p, a) => `${p} Teile${a ? `, ${a} Unterbaugruppen` : ""}`, showAll: "Alle zeigen" },
+  measure: {
+    title: "Messung",
+    pin: "Maß behalten",
+    pinned: "Behaltene Maße",
+    noPins: "Noch keine Maße behalten.",
+    clear: "Alles löschen",
+    hints: { auto: "Punkt, Kante oder Fläche anklicken – ein zweites Element ergibt Abstand oder Winkel." },
+    // Measured values carry machine kinds; translate the ones you need, fall back to the English hint.
+    item: (item) => ({ diameter: "Durchmesser", radius: "Radius", area: "Fläche", length: "Länge", distance: "Abstand", angle: "Winkel" })[item.kind] ?? item.label,
+  },
+  info: {
+    title: "Bauteil",
+    file: "Datei",
+    kind: "Typ",
+    kinds: { part: "Teil", assembly: "Baugruppe", drawing: "Zeichnung" },
+    size: "Abmessungen",
+    volume: "Volumen ≈",
+    area: "Oberfläche ≈",
+    density: "Dichte",
+    mass: "Masse ≈",
+    faces: "Flächen",
+    faceTypes: { plane: "Ebenen", cylinder: "Zylinder", cone: "Kegel", sphere: "Kugeln", other: "Freiform" },
+    version: "Dateiversion",
+    properties: "Eigenschaften",
+    approxNote: "Werte mit ≈ sind Näherungen aus dem Dreiecksnetz.",
+  },
+  sheets: { title: "Blätter", model: "3D-Modell" },
+  viewCube: { front: "VORNE", back: "HINTEN", top: "OBEN", bottom: "UNTEN", left: "LINKS", right: "RECHTS" },
+  loading: "Wird gelesen …",
 };
+
+declare global {
+  interface Window {
+    __swViewer?: SwViewerInstance | null;
+    __swResult?: SwParseResult;
+  }
+}
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [lang, setLang] = useState<"en" | "de">("en");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const labels = useMemo(() => (lang === "de" ? de : undefined), [lang]);
 
   return (
     <div className="app">
@@ -34,27 +83,31 @@ function App() {
         <h1>SolidWorks Viewer (React)</h1>
         <input
           type="file"
-          accept=".sldprt,.sldasm"
+          accept=".sldprt,.sldasm,.slddrw"
           onChange={(ev) => {
-            const next = ev.target.files?.[0] ?? null;
-            setFile(next);
-            setStatus(next ? { kind: "parsing" } : { kind: "idle" });
+            setFile(ev.target.files?.[0] ?? null);
+            setWarnings([]);
           }}
         />
-        <span className={status.kind === "error" ? "error" : "status"}>{statusText(status)}</span>
-        {status.kind === "done" && status.result.warnings.length > 0 && (
-          <span className="warn">Warnungen: {status.result.warnings.join("; ")}</span>
-        )}
+        <label>
+          <input type="checkbox" checked={lang === "de"} onChange={(e) => setLang(e.target.checked ? "de" : "en")} /> Deutsch
+        </label>
+        {warnings.length > 0 && <span className="warn">Warnings: {warnings.join("; ")}</span>}
       </header>
-      <SwViewer
+      <SwViewerPanel
         className="viewer"
         source={file}
         createWorker={createWorker}
-        onResult={(result) => setStatus({ kind: "done", result })}
-        onError={(error) => setStatus({ kind: "error", message: error.message })}
-      >
-        {status.kind === "parsing" && <div className="overlay">Wird gelesen …</div>}
-      </SwViewer>
+        labels={labels}
+        locale={lang === "de" ? "de-DE" : "en-US"}
+        onResult={(r) => {
+          window.__swResult = r;
+          setWarnings(r.warnings);
+        }}
+        onReady={(v) => {
+          window.__swViewer = v;
+        }}
+      />
     </div>
   );
 }

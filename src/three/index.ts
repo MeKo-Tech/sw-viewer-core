@@ -1,2 +1,67 @@
-export { buildSwGroup, type CameraTarget, disposeObject, fitCamera } from "./scene.ts";
-export { createSwViewer, type SwViewer, type SwViewerOptions } from "./viewer.ts";
+export {
+  applyPartColors,
+  buildSwGroup,
+  type CameraTarget,
+  disposeObject,
+  EDGE_COLOR,
+  fitCamera,
+  segmentEdges,
+  setEdgesVisible,
+  type SwEdgeUserData,
+  type SwGroupOptions,
+  type SwMeshUserData,
+  swMeshData,
+  triangleFaces,
+} from "./scene.ts";
+export { createSwViewer, type SwColorMode, type SwViewer, type SwViewerOptions } from "./viewer.ts";
+export {
+  clipPlaneOf,
+  contourMesh,
+  cylinderSectionNormal,
+  sectionFromDescription,
+  sectionPlane,
+  sectionRange,
+  type SwAxis,
+  type SwBox,
+  type SwContourSource,
+  type SwSectionSpec,
+  SwSectionView,
+} from "./section.ts";
+export {
+  computeMeasurement,
+  DIMENSION_PREFIX,
+  formatDimension,
+  formatMeasureValue,
+  formatNumber,
+  MEASURE_MODES,
+  oppositePlane,
+  primaryDimension,
+  type SwArc,
+  type SwDimension,
+  type SwFormatOptions,
+  type SwMeasureContext,
+  type SwMeasureMode,
+  type SwMeasurement,
+  type SwSnapKind,
+  type SwViewerPick,
+} from "./measureModel.ts";
+export { type SwMeasureCallbacks, type SwMeasureHost, SwMeasureTool, type SwPinnedMeasurement } from "./measure.ts";
+export {
+  defaultViewCubeLabels,
+  type SwStandardView,
+  SwViewCube,
+  type SwViewCubeLabels,
+  VIEW_CUBE_SIZE,
+  VIEW_DIRECTIONS,
+} from "./viewCube.ts";
+export {
+  componentParents,
+  componentSubtree,
+  flattenComponents,
+  initialHiddenComponents,
+  isComponentHidden,
+  PART_PALETTE,
+  partColors,
+  rgbCss,
+  setComponentHidden,
+} from "./components.ts";
