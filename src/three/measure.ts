@@ -49,6 +49,25 @@ export interface SwMeasureCallbacks {
   onPinsChange?: (pins: SwPinnedMeasurement[]) => void;
 }
 
+interface SnapSet {
+  points: SwSnapPoint[];
+  /** Bounding sphere of `points` (mesh space); null without points. */
+  sphere: THREE.Sphere | null;
+}
+
+const snapSet = (m: SwMesh): SnapSet => {
+  const points = snapPoints(m);
+  if (!points.length) return { points, sphere: null };
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (const s of points) box.expandByPoint(v.set(s.point[0], s.point[1], s.point[2]));
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  let r = 0;
+  for (const s of points) r = Math.max(r, sphere.center.distanceTo(v.set(s.point[0], s.point[1], s.point[2])));
+  sphere.radius = r;
+  return { points, sphere };
+};
+
 interface Hit {
   pick: SwViewerPick;
   object?: THREE.Mesh;
@@ -107,7 +126,8 @@ export class SwMeasureTool {
   private pins: { id: number; measurement: SwMeasurement; group: THREE.Group }[] = [];
   private nextPin = 1;
   private readonly raycaster = new THREE.Raycaster();
-  private readonly snapCache = new WeakMap<SwMesh, SwSnapPoint[]>();
+  /** Snap points and their mesh-space bounding sphere, keyed by the shared `edges` buffer. */
+  private readonly snapCache = new WeakMap<object, SnapSet>();
   private readonly snapMarker: CSS2DObject;
   private hoverKey = "";
   private sectionPick: { kind: "face" | "cylinder"; resolve: (h: Hit | null) => void } | null = null;
@@ -203,10 +223,11 @@ export class SwMeasureTool {
     return model.children.filter((o): o is THREE.Mesh => o instanceof THREE.Mesh && o.visible && !!swMeshData(o));
   }
 
-  private snaps(o: THREE.Mesh): SwSnapPoint[] {
-    const m = swMeshData(o)!.swMesh;
-    let s = this.snapCache.get(m);
-    if (!s) this.snapCache.set(m, (s = snapPoints(m)));
+  /** Snap points of a mesh; instances sharing their edges share the cached set. */
+  private snaps(m: SwMesh): SnapSet {
+    const key = m.edges ?? m;
+    let s = this.snapCache.get(key);
+    if (!s) this.snapCache.set(key, (s = snapSet(m)));
     return s;
   }
 
@@ -262,7 +283,18 @@ export class SwMeasureTool {
       }
     }
     if (fh) {
-      if (mode === "point") return { pick: { kind: "point", point: fh.point.toArray() as Vec3, snap: "surface" } };
+      if (mode === "point") {
+        const data = swMeshData(fh.object);
+        return {
+          pick: {
+            kind: "point",
+            point: fh.point.toArray() as Vec3,
+            snap: "surface",
+            ...(data ? { meshIndex: data.swIndex } : {}),
+            ...(data?.componentId !== undefined ? { componentId: data.componentId } : {}),
+          },
+        };
+      }
       if (mode === "auto" || mode === "face") {
         const owner = fh.object as THREE.Mesh;
         const data = swMeshData(owner)!;
@@ -295,22 +327,47 @@ export class SwMeasureTool {
       const d = Math.hypot(sx - x, sy - y);
       if (d < radius) cands.push({ p: p.clone(), kind, d, meshIndex, componentId });
     };
+    // Cursor ray and the largest angle `radius` pixels can span (the image plane lies at
+    // distance >= 1 in tangent space), to skip instances whose snap points are all away
+    // from the cursor before projecting each of them.
+    const cursor = new THREE.Raycaster();
+    cursor.setFromCamera(new THREE.Vector2(((x - r.left) / (r.width || 1)) * 2 - 1, -((y - r.top) / (r.height || 1)) * 2 + 1), camera);
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (camera.zoom || 1);
+    const maxAngle = radius * 2 * tanHalf * Math.max(1 / (r.height || 1), camera.aspect / (r.width || 1)) + 1e-6;
+    const sphere = new THREE.Sphere();
+    const toCenter = new THREE.Vector3();
+    const nearCursor = (local: THREE.Sphere, matrix: THREE.Matrix4) => {
+      sphere.copy(local).applyMatrix4(matrix);
+      toCenter.copy(sphere.center).sub(cursor.ray.origin);
+      const dist = toCenter.length();
+      if (dist <= sphere.radius * (1 + 1e-9) + 1e-9) return true;
+      const angle = cursor.ray.direction.angleTo(toCenter);
+      return angle <= Math.asin(Math.min(1, sphere.radius / dist)) + maxAngle;
+    };
     const w = new THREE.Vector3();
     for (const o of meshes) {
       const data = swMeshData(o)!;
-      for (const s of this.snaps(o)) {
+      const set = this.snaps(data.swMesh);
+      if (!set.sphere || !nearCursor(set.sphere, o.matrixWorld)) continue;
+      for (const s of set.points) {
         w.set(s.point[0], s.point[1], s.point[2]).applyMatrix4(o.matrixWorld);
         consider(w, s.kind, data.swIndex, data.componentId);
       }
     }
     const contours = section.contours;
     if (contours) {
-      let cs = this.snapCache.get(contours);
-      if (!cs) this.snapCache.set(contours, (cs = snapPoints(contours)));
-      for (const s of cs) {
+      const cs = this.snaps(contours);
+      let componentOf: Map<number, string | undefined> | undefined;
+      for (const s of cs.points) {
         const src = section.contourSources[s.edge];
-        const owner = meshes.find((m) => swMeshData(m)!.swIndex === src?.meshIndex);
-        consider(v3(s.point), s.kind, src?.meshIndex, owner ? swMeshData(owner)!.componentId : undefined);
+        if (!componentOf) {
+          componentOf = new Map();
+          for (const m of meshes) {
+            const d = swMeshData(m)!;
+            if (!componentOf.has(d.swIndex)) componentOf.set(d.swIndex, d.componentId);
+          }
+        }
+        consider(v3(s.point), s.kind, src?.meshIndex, src ? componentOf.get(src.meshIndex) : undefined);
       }
     }
     cands.sort((a, b) => a.d - b.d);
@@ -427,11 +484,19 @@ export class SwMeasureTool {
     }
   }
 
-  /** Drops picks whose mesh became invisible. */
+  /**
+   * Drops picks whose mesh became invisible: face and edge picks by their mesh object,
+   * contour edges and point picks by the `meshIndex` they came from. Points without
+   * a mesh (none are made today) are kept.
+   */
   pruneHidden() {
-    const visible = new Set(this.visibleMeshes());
+    const meshes = this.visibleMeshes();
+    const visible = new Set(meshes);
+    const visibleIndex = new Set(meshes.map((m) => swMeshData(m)!.swIndex));
     const before = this.selection.length;
-    this.selection = this.selection.filter((s) => !s.object || visible.has(s.object));
+    this.selection = this.selection.filter((s) =>
+      s.object ? visible.has(s.object) : s.pick.meshIndex === undefined || visibleIndex.has(s.pick.meshIndex),
+    );
     if (this.selection.length !== before) this.update();
     this.setHover(null);
   }
