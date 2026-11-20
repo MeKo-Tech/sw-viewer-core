@@ -30,17 +30,73 @@ export const decodeEntities = (s: string) =>
 
 const localNameOf = (name: string) => name.slice(name.indexOf(":") + 1);
 
-const ATTR = /([^\s=/>]+)\s*=\s*("([^"]*)"|'([^']*)')/g;
+/** Same set as the regex class `\s`. */
+const isSpace = (c: number) =>
+  (c >= 9 && c <= 13) ||
+  c === 32 ||
+  c === 0xa0 ||
+  c === 0x1680 ||
+  (c >= 0x2000 && c <= 0x200a) ||
+  c === 0x2028 ||
+  c === 0x2029 ||
+  c === 0x202f ||
+  c === 0x205f ||
+  c === 0x3000 ||
+  c === 0xfeff;
+
+/** Characters of an attribute name: anything but whitespace, `=`, `/` and `>`. */
+const isNameChar = (c: number) => c !== 61 && c !== 47 && c !== 62 && !isSpace(c);
+
+/**
+ * Reads `name = "value"` / `name='value'` pairs from `body` starting at `from`, in one
+ * linear pass. Matches what the regex `([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')` found with
+ * global matching (junk between pairs is skipped), without its quadratic backtracking
+ * on long tokens that are not followed by `=`.
+ */
+export const readAttributes = (body: string, from: number, out: Record<string, string>) => {
+  const n = body.length;
+  let i = from;
+  while (i < n) {
+    if (!isNameChar(body.charCodeAt(i))) {
+      i++;
+      continue;
+    }
+    const nameStart = i;
+    while (i < n && isNameChar(body.charCodeAt(i))) i++;
+    const nameEnd = i;
+    let k = i;
+    while (k < n && isSpace(body.charCodeAt(k))) k++;
+    if (body.charCodeAt(k) !== 61) continue;
+    k++;
+    while (k < n && isSpace(body.charCodeAt(k))) k++;
+    const q = body[k];
+    if (q !== '"' && q !== "'") continue;
+    const close = body.indexOf(q, k + 1);
+    if (close < 0) continue;
+    out[body.slice(nameStart, nameEnd)] = decodeEntities(body.slice(k + 1, close));
+    i = close + 1;
+  }
+};
 
 /** Hard cap on nesting, so crafted input cannot blow the stack in consumers that recurse. */
 const MAX_DEPTH = 256;
+/** Element cap; a stream with more elements is read up to here (treated as truncated). */
+export const MAX_XML_ELEMENTS = 2_000_000;
 
-/** Parses `input` (string or UTF-8/UTF-16 bytes) and returns the root element. */
-export const parseXml = (input: string | Uint8Array): XmlElement | undefined => {
+/**
+ * Parses `input` (string or UTF-8/UTF-16 bytes) and returns the root element. Stops
+ * after `maxElements` elements (default `MAX_XML_ELEMENTS`) and returns what it read
+ * so far, like for a truncated stream.
+ */
+export const parseXml = (
+  input: string | Uint8Array,
+  { maxElements = MAX_XML_ELEMENTS }: { maxElements?: number } = {},
+): XmlElement | undefined => {
   const src = typeof input === "string" ? input : decodeXmlBytes(input);
   const root: XmlElement = { name: "", localName: "", attributes: {}, children: [], text: "" };
   const stack: XmlElement[] = [root];
   let i = 0;
+  let elements = 0;
   while (i < src.length) {
     const lt = src.indexOf("<", i);
     const top = stack[stack.length - 1];
@@ -86,11 +142,9 @@ export const parseXml = (input: string | Uint8Array): XmlElement | undefined => 
       const body = src.slice(lt + 1, selfClosing ? j - 1 : j);
       const nameEnd = body.search(/[\s/]|$/);
       const name = body.slice(0, nameEnd);
+      if (++elements > maxElements) break;
       const attributes: Record<string, string> = {};
-      ATTR.lastIndex = nameEnd;
-      for (let m = ATTR.exec(body); m; m = ATTR.exec(body)) {
-        attributes[m[1]] = decodeEntities(m[3] ?? m[4] ?? "");
-      }
+      readAttributes(body, nameEnd, attributes);
       const el: XmlElement = { name, localName: localNameOf(name), attributes, children: [], text: "" };
       top.children.push(el);
       if (!selfClosing && stack.length < MAX_DEPTH) stack.push(el);
