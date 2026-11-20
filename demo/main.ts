@@ -1,11 +1,10 @@
 // Demo: drop a SolidWorks file, parse it in the worker, render it with three.js. The scene
-// setup mirrors moin-bridge's StepViewer/stepScene so the integration stays close.
+// rendering comes from src/three, which mirrors moin-bridge's StepViewer/stepScene.
 
-import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { signedVolume } from "../src/displayMesh.ts";
 import type { SwParseReply } from "../src/protocol.ts";
-import type { SwMesh, SwParseResult } from "../src/types.ts";
+import type { SwParseResult } from "../src/types.ts";
+import { createSwViewer } from "../src/three/viewer.ts";
 
 const PARSE_TIMEOUT_MS = 30_000;
 
@@ -16,105 +15,7 @@ const drop = document.getElementById("drop") as HTMLDivElement;
 const previewImg = document.getElementById("preview") as HTMLImageElement;
 const fileInput = document.getElementById("file") as HTMLInputElement;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0xffffff, 1);
-stage.prepend(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.7));
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-scene.add(dirLight);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-camera.add(dirLight);
-dirLight.position.set(1, 1, 1);
-scene.add(camera);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-let model: THREE.Group | null = null;
-
-const resize = () => {
-  const { clientWidth: w, clientHeight: h } = stage;
-  renderer.setSize(w, h);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-};
-new ResizeObserver(resize).observe(stage);
-
-renderer.setAnimationLoop(() => {
-  controls.update();
-  renderer.render(scene, camera);
-});
-
-const buildGroup = (meshes: SwMesh[]) => {
-  const group = new THREE.Group();
-  for (const m of meshes) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
-    if (m.normals) {
-      g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
-    } else {
-      g.computeVertexNormals();
-    }
-    g.setIndex(new THREE.BufferAttribute(m.indices, 1));
-    const baseColor = m.color ? new THREE.Color(...m.color) : new THREE.Color(0xcccccc);
-    const vertexColors = m.faceRanges?.some((range) => range.color) ?? false;
-    if (vertexColors && m.faceRanges) {
-      const colors = new Float32Array(m.positions.length);
-      for (let i = 0; i < colors.length; i += 3) {
-        colors[i] = baseColor.r;
-        colors[i + 1] = baseColor.g;
-        colors[i + 2] = baseColor.b;
-      }
-      for (const { start, count, color } of m.faceRanges) {
-        if (!color) continue;
-        for (let i = start; i < start + count; i++) {
-          colors.set(color, 3 * m.indices[i]);
-        }
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    }
-    const material = new THREE.MeshPhongMaterial({
-      color: vertexColors ? 0xffffff : baseColor,
-      vertexColors,
-      specular: 0,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(g, material);
-    if (m.matrix) {
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.fromArray(m.matrix);
-      mesh.matrixWorldNeedsUpdate = true;
-    }
-    group.add(mesh);
-  }
-  return group;
-};
-
-const fitCamera = (obj: THREE.Object3D) => {
-  const box = new THREE.Box3().setFromObject(obj);
-  const center = box.getCenter(new THREE.Vector3());
-  const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray()) || 1;
-  camera.near = maxDim * 0.01;
-  camera.far = maxDim * 100;
-  const d = maxDim * 1.5;
-  camera.position.set(center.x + d, center.y + d, center.z + d);
-  camera.updateProjectionMatrix();
-  controls.target.copy(center);
-  controls.update();
-};
-
-const clearModel = () => {
-  if (!model) return;
-  scene.remove(model);
-  model.traverse((o) => {
-    if (o instanceof THREE.Mesh) {
-      o.geometry.dispose();
-      (o.material as THREE.Material).dispose();
-    }
-  });
-  model = null;
-};
+const viewer = createSwViewer(stage);
 
 const parseInWorker = (buffer: ArrayBuffer) =>
   new Promise<SwParseResult>((resolve, reject) => {
@@ -134,7 +35,7 @@ const parseInWorker = (buffer: ArrayBuffer) =>
   });
 
 const show = async (file: File) => {
-  clearModel();
+  viewer.setModel(null);
   previewImg.style.display = "none";
   warn.textContent = "";
   info.textContent = `${file.name}: lese …`;
@@ -145,9 +46,7 @@ const show = async (file: File) => {
     drop.style.display = "none";
     warn.textContent = r.warnings.join("; ");
     if (r.meshes.length) {
-      model = buildGroup(r.meshes);
-      scene.add(model);
-      fitCamera(model);
+      viewer.setModel(r);
       const summary = `${file.name} · ${r.kind} · v${r.version}`;
       if (r.kind === "assembly") {
         const triangles = r.meshes.reduce((sum, m) => sum + m.indices.length / 3, 0);

@@ -6,7 +6,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./three": "./src/three/index.ts",
+    "./react": "./src/react/index.ts"
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
@@ -19,9 +21,25 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/three": "^0.187.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "three": "^0.187.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "three": ">=0.160"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    }
   }
 }

@@ -36,6 +36,33 @@ const r = await parseSwInWorker(
 );
 ```
 
+## React component
+
+`<SwViewer>` parses in the worker, renders with three.js and falls back to the
+embedded thumbnail. It needs `react` (18+) and `three` (0.160+), which the app
+provides. The root entry stays free of both.
+
+```tsx
+import { SwViewer } from "./vendor/sw-viewer-core/react/index.js";
+
+<SwViewer
+  source={file} // File | Blob | ArrayBuffer | Uint8Array (copied, never detached)
+  createWorker={() => new Worker(new URL("./vendor/sw-viewer-core/worker.js", import.meta.url), { type: "module" })}
+  onResult={(r) => setWarnings(r.warnings)}
+  onError={setError}
+  style={{ height: 400 }}
+>
+  {/* optional overlay, e.g. a spinner */}
+</SwViewer>
+```
+
+Pass `result` instead of `source` when you have already parsed the file. Use
+`useSwParse(source, createWorker)` for the parse state without the viewer. The
+component has no built-in texts, so the app owns all UI strings. Without React,
+`three/index.js` offers `createSwViewer(container)` and the scene helpers
+`buildSwGroup`, `fitCamera` and `disposeObject`. Demo: `npm run demo` →
+`/react.html`.
+
 ## How the apps get it
 
 moin-bridge and moin-deck do not install this package. They carry a **vendored,
