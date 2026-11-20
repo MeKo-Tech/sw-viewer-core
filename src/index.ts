@@ -1,6 +1,7 @@
 export {
   containerKind,
   containerVersion,
+  MAX_ENTRY_SIZE,
   openSwContainer,
   SwContainerError,
   type SwContainer,
