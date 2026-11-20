@@ -1,6 +1,6 @@
 {
   "name": "@meko-tech/sw-viewer-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Decodes embedded display meshes and thumbnails from SolidWorks parts and assemblies in the browser",
   "type": "module",
@@ -17,7 +17,7 @@
     "build:demo": "node node_modules/vite/bin/vite.js build demo --outDir ../dist/demo --emptyOutDir",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
-    "sync": "node tools/sync.ts"
+    "release": "node tools/release.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

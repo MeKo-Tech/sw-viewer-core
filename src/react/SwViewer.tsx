@@ -16,7 +16,7 @@ type DivAttributes = Omit<HTMLAttributes<HTMLDivElement>, "onError" | "children"
 export interface SwViewerProps extends DivAttributes {
   /** File or bytes to parse. Requires `createWorker`. */
   source?: SwSource | null;
-  /** Worker factory, e.g. `() => new Worker(new URL("…/worker.js", import.meta.url), { type: "module" })`. */
+  /** Worker factory. With Vite: `import SwParseWorker from "@meko-tech/sw-viewer-core/worker?worker"`, then `() => new SwParseWorker()`. */
   createWorker?: () => Worker;
   /** Already parsed result; takes precedence over `source`. */
   result?: SwParseResult | null;

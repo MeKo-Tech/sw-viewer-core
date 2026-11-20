@@ -24,16 +24,13 @@ const r = await parseSwFile(new Uint8Array(buffer));
 ```
 
 In an app, parse in the worker and let `parseSwInWorker` terminate it after a
-timeout:
+timeout. With Vite, the `?worker` import bundles the worker as its own chunk:
 
 ```ts
-import { parseSwInWorker } from "./vendor/sw-viewer-core/index.js";
+import { parseSwInWorker } from "@meko-tech/sw-viewer-core";
+import SwParseWorker from "@meko-tech/sw-viewer-core/worker?worker";
 
-const r = await parseSwInWorker(
-  () => new Worker(new URL("./vendor/sw-viewer-core/worker.js", import.meta.url), { type: "module" }),
-  buffer,
-  { timeoutMs: 30_000, signal },
-);
+const r = await parseSwInWorker(() => new SwParseWorker(), buffer, { timeoutMs: 30_000, signal });
 ```
 
 ## React component
@@ -43,11 +40,12 @@ embedded thumbnail. It needs `react` (18+) and `three` (0.160+), which the app
 provides. The root entry stays free of both.
 
 ```tsx
-import { SwViewer } from "./vendor/sw-viewer-core/react/index.js";
+import { SwViewer } from "@meko-tech/sw-viewer-core/react";
+import SwParseWorker from "@meko-tech/sw-viewer-core/worker?worker";
 
 <SwViewer
   source={file} // File | Blob | ArrayBuffer | Uint8Array (copied, never detached)
-  createWorker={() => new Worker(new URL("./vendor/sw-viewer-core/worker.js", import.meta.url), { type: "module" })}
+  createWorker={() => new SwParseWorker()}
   onResult={(r) => setWarnings(r.warnings)}
   onError={setError}
   style={{ height: 400 }}
@@ -70,23 +68,26 @@ away.
 Pass `result` instead of `source` when you have already parsed the file. Use
 `useSwParse(source, createWorker)` for the parse state without the viewer. The
 component has no built-in texts, so the app owns all UI strings. Without React,
-`three/index.js` offers `createSwViewer(container)` and the scene helpers
+`@meko-tech/sw-viewer-core/three` offers `createSwViewer(container)` and the scene helpers
 `buildSwGroup`, `fitCamera` and `disposeObject`. Demo: `npm run demo` →
 `/react.html`.
 
-## How the apps get it
+## Installing
 
-moin-bridge and moin-deck do not install this package. They carry a **vendored,
-generated copy** of the built JS and `.d.ts` files, so no registry token is needed
-in CI, Docker builds or on developer machines:
+Each release attaches the npm package to its GitHub Release. Apps depend on that
+file, so installing needs no registry and no token:
 
-```bash
-node tools/sync.ts ../moin-bridge/src/vendor/sw-viewer-core
-node tools/sync.ts ../moin-deck/src/vendor/sw-viewer-core
+```json
+"@meko-tech/sw-viewer-core": "https://github.com/MeKo-Tech/sw-viewer-core/releases/download/v0.2.0/meko-tech-sw-viewer-core-0.2.0.tgz"
 ```
 
-Every file carries a header with the source version and commit. Never edit the
-copies; change the decoder here, release, and sync again.
+In a bundler with manual chunks, group the package with `three`, so it stays out
+of the eagerly loaded vendor chunk.
+
+To release, bump `version` in `package.json`, commit and push to main, then run
+`node tools/release.ts --publish`. That tags `v<version>` and creates the
+release. Without `--publish`, it only writes the tarball to `dist/`, which an app
+can install with `bun add file:<path>` to try out changes before a release.
 
 ## Development
 
