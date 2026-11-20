@@ -25,5 +25,8 @@ export const transferables = (r: SwParseResult): ArrayBuffer[] => {
   if (r.preview) {
     out.add(r.preview.buffer as ArrayBuffer);
   }
+  for (const s of r.sheets ?? []) {
+    out.add(s.image.buffer as ArrayBuffer);
+  }
   return [...out];
 };
