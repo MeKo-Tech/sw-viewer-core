@@ -104,19 +104,55 @@ without a display mesh. [Controlled part measurements](https://github.com/blussy
 
 ## Assembly display caches
 
-- Both Gear Drive assemblies have triangles in `Contents/DisplayLists`. The
-  triangles use part-local coordinates. `uoTempAssemblySHDData_c` records carry
-  the instance name and saved transform, including composed transforms for nested
-  components. Repeated instances can reference a previously stored mesh.
-- Mechanical Clamp has placements in `Contents/DisplayLists` and triangles in
-  `FaceTessellations/000-000-005`. The directory stream associates seven named
-  instances with the cache and identifies each component's face run. The cache
-  includes the geometry for a part file missing from the public checkout.
-- Across the three assemblies, the 55 inspected placement records match the
-  transforms in `swXmlContents/COMPINSTANCETREE` after composing parent placements.
-  The viewer renders 23, 24, and 7 leaf instances from the three files. The
-  embedded cache is the source of placements and geometry. Hidden and suppressed
-  instances were outside this validation set.
+Instances come from the component tree, meshes from the display caches. The
+tree reading and the directory-order mapping follow MeKo's CAD-Viewer-Projekt
+(`src/sw.js`, `parseAssembly`).
+
+- **Component tree.** `swXmlContents/COMPINSTANCETREE` is UTF-8 XML. `swFile`
+  rows give id, `swDocType` and `swPath`; `swModel` rows point to a file
+  (`swFileRef`); an assembly model lists its components as `swReference`
+  children (`swComponentName`, `swReferenceNumber`, `swModelRef`,
+  `swConfigurationName`, `swSuppressed`, `swHidden`, `swTransform`). The root is
+  the model of the first `swFile`. A component's id is its instance path, e.g.
+  `Sub-1/Part-2`. Hidden propagates to children. Suppressed instances are not
+  rendered, and suppressed sub-assemblies are not expanded. The root model's
+  `swBoundingBox` (min xyz, max xyz, metres) is SolidWorks' exact box.
+- **Transforms.** `swTransform` has 16 numbers in the row-vector convention:
+  rows 0–2 rotation, row 3 translation in metres, last value the scale. Read in
+  order, they form the column-major matrix of `SwMesh.matrix`, after converting
+  the translation to mm and applying the scale to the rotation. Nested
+  transforms compose as `parent · child`.
+- **Inline caches.** Triangles in `Contents/DisplayLists` use part-local
+  coordinates. `uoTempAssemblySHDData_c` records carry the instance chain
+  (`Sub-1@Top/Part-2@Sub`) and the saved, already composed transform. Without a
+  tree, these records are the instances.
+- **Separate caches.** `FaceTessellations/Directory` holds `u32 2, u32 ?, u32
+  rows`. Each row is `u32 id`, the instance chain (MFC CString), `u32`, 8 bytes,
+  the 8-byte signature of the row it reuses (zero for none), its own 8-byte
+  signature, the stream name (`000-000-001`), `u32 ordinal` and a `u32` count
+  of 12-byte items. A row with a stream points to a face group in that stream:
+  a 56-byte header with ordinal, signature and face count. Repeated instances
+  have no stream, ordinal `0xFFFFFFFF` and reuse the geometry of the row with
+  the referenced signature. Pattern rows have neither stream nor reference.
+- **Mapping.** Cache instance chains map to tree ids by dropping the
+  `@Assembly` suffixes. This also handles a file saved as a copy, whose cache
+  keeps the old assembly name (Baugr2: `…@Baugr1`). An instance without its
+  own cache reuses the mesh of another instance of the same part and
+  configuration, so instances share their buffers.
+- **Fallback.** When rows cannot be paired with groups, faces are assigned to
+  bodies by body headers in the streams (`u32 1, 1, 0, 0`, then `96 ?? 20 00`;
+  body index 20 bytes before). Bodies are assigned to parts in the order in
+  which `Name-N@Assembly` names followed by a stream name appear in the
+  directory text. A second pass matches `Name-N@` alone, for copies. Without a
+  directory, the order is the order in which parts first appear in the tree. A
+  stream without body headers is not guessed at.
+- **Validation.** Baugr1 (5 parts), Baugr2 (2 parts, saved as a copy) and
+  Baugr3 (4 sub-assemblies, 15 parts, rotations of 30°, 90° and 180°) match
+  their `swBoundingBox`. Baugr1 and Baugr2 match within 0.05 mm. Baugr3 is up
+  to 0.36 mm smaller because the tessellation cuts the Ø50 cylinders short. The
+  directory-order fallback gives the same meshes. Gear Drive (24 and 23
+  instances) and Mechanical Clamp (7) render as before. The test data has no
+  hidden or suppressed components, so tests cover them with edited trees.
 
 ## Face colors
 

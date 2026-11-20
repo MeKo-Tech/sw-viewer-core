@@ -1,7 +1,13 @@
+import {
+  instancePathOf,
+  parseComponentTree,
+  type SwComponentTree,
+  type SwTreeLeaf,
+} from "./assemblyTree.ts";
 import type { SwContainer } from "./container.ts";
-import { buildBodyMesh, scanFaceTables } from "./displayMesh.ts";
+import { buildBodyMesh, scanFaceTables, type FaceTess } from "./displayMesh.ts";
 import { readMfcUnicodeString } from "./mfc.ts";
-import type { SwMesh } from "./types.ts";
+import type { SwComponentNode, SwMesh } from "./types.ts";
 
 const componentClassName = new TextEncoder().encode("uoTempAssemblySHDData_c");
 const identityRotation = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -119,10 +125,17 @@ const readComponentRecords = (bytes: Uint8Array): ComponentRecord[] => {
 
 interface CacheRecord {
   instance: string;
+  /** Empty for a row that reuses another row's geometry (`reference`). */
   stream: string;
   ordinal: number;
   signature: [number, number];
+  /** Signature of the row whose geometry a repeated instance reuses. */
+  reference?: [number, number];
 }
+
+/** Ordinal of a directory row without its own face group. */
+const NO_GROUP = 0xffffffff;
+const MAX_DIRECTORY_ITEMS = 4096;
 
 const readCacheDirectory = (bytes: Uint8Array): CacheRecord[] | undefined => {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -133,20 +146,29 @@ const readCacheDirectory = (bytes: Uint8Array): CacheRecord[] | undefined => {
   for (let i = 0; i < count; i++) {
     const instance = readMfcUnicodeString(bytes, offset + 4);
     if (!instance || instance.nextOffset + 28 > bytes.length) return;
+    const referenceOffset = instance.nextOffset + 12;
+    const reference: [number, number] = [v.getUint32(referenceOffset, true), v.getUint32(referenceOffset + 4, true)];
     const signatureOffset = instance.nextOffset + 20;
     const signature: [number, number] = [
       v.getUint32(signatureOffset, true),
       v.getUint32(signatureOffset + 4, true),
     ];
     const stream = readMfcUnicodeString(bytes, signatureOffset + 8);
-    if (!stream || !/^\d+-\d+-\d+$/.test(stream.value) || stream.nextOffset + 20 > bytes.length) return;
-    records.push({
-      instance: instance.value,
-      stream: stream.value,
-      ordinal: v.getUint32(stream.nextOffset, true),
-      signature,
-    });
-    offset = stream.nextOffset + 20;
+    if (!stream || stream.nextOffset + 8 > bytes.length) return;
+    const ordinal = v.getUint32(stream.nextOffset, true);
+    // Then a count of 12-byte items; rows of repeated instances and patterns have
+    // no stream, no group (ordinal NO_GROUP) and sometimes no items.
+    const items = v.getUint32(stream.nextOffset + 4, true);
+    if (items > MAX_DIRECTORY_ITEMS) return;
+    const next = stream.nextOffset + 8 + 12 * items;
+    if (next > bytes.length) return;
+    if (stream.value) {
+      if (!/^\d+-\d+-\d+$/.test(stream.value) || ordinal === NO_GROUP) return;
+      records.push({ instance: instance.value, stream: stream.value, ordinal, signature });
+    } else if (ordinal === NO_GROUP && (reference[0] || reference[1])) {
+      records.push({ instance: instance.value, stream: "", ordinal, signature, reference });
+    } else if (ordinal !== NO_GROUP) return;
+    offset = next;
   }
   return records;
 };
@@ -184,50 +206,78 @@ const recordMesh = <Key>(meshes: Map<Key, SwMesh | null>, key: Key, mesh: SwMesh
   else if (meshes.get(key) !== mesh) meshes.set(key, null);
 };
 
-/** Reads saved assembly instances from the embedded display caches. */
-export const readAssemblyMeshes = async (
-  container: SwContainer,
-  displayLists: Uint8Array,
-  maxVertices: number
-): Promise<{ meshes: SwMesh[]; warnings: string[] }> => {
-  const records = readComponentRecords(displayLists);
-  const warnings: string[] = [];
-  if (!records.length) {
-    return { meshes: [], warnings: ["the assembly has no supported component display records"] };
+const TESSELLATION_PREFIX = "FaceTessellations/";
+const DIRECTORY = TESSELLATION_PREFIX + "Directory";
+
+/** Scans face tables against one vertex budget for the whole assembly; streams are scanned once. */
+class FaceScanner {
+  private vertexCount = 0;
+  private readonly streams = new Map<string, FaceTess[]>();
+  private readonly maxVertices: number;
+  constructor(maxVertices: number) {
+    this.maxVertices = maxVertices;
   }
 
-  let vertexCount = 0;
-  const scan = (bytes: Uint8Array) => {
+  scan(bytes: Uint8Array, name?: string) {
+    const known = name === undefined ? undefined : this.streams.get(name);
+    if (known) return known;
     const faces = scanFaceTables(bytes);
     for (const face of faces) {
-      vertexCount += face.positions.length / 3;
-      if (vertexCount > maxVertices) {
-        throw new Error("assembly display mesh too large (" + vertexCount + " vertices)");
+      this.vertexCount += face.positions.length / 3;
+      if (this.vertexCount > this.maxVertices) {
+        throw new Error("assembly display mesh too large (" + this.vertexCount + " vertices)");
       }
     }
+    if (name !== undefined) this.streams.set(name, faces);
     return faces;
-  };
+  }
+}
+
+interface DisplayCaches {
+  records: ComponentRecord[];
+  /** Meshes stored inline after a placement record in `Contents/DisplayLists`. */
+  inline: Map<Component, SwMesh>;
+  /** Meshes from separate cache streams by directory instance name; null when ambiguous. */
+  separate: Map<string, SwMesh | null>;
+  warnings: string[];
+}
+
+/** Reads the meshes of the embedded display caches (DisplayLists and FaceTessellations). */
+const readDisplayCaches = async (
+  container: SwContainer,
+  displayLists: Uint8Array | undefined,
+  scanner: FaceScanner
+): Promise<DisplayCaches> => {
+  const warnings: string[] = [];
+  const records = displayLists ? readComponentRecords(displayLists) : [];
 
   const inline = new Map<Component, SwMesh>();
-  const inlineFaces = scan(displayLists);
-  let faceIndex = 0;
-  for (const [i, record] of records.entries()) {
-    while (faceIndex < inlineFaces.length && inlineFaces[faceIndex].offset < record.offset) faceIndex++;
-    const firstFace = faceIndex;
-    const limit = records[i + 1]?.offset ?? displayLists.length;
-    while (faceIndex < inlineFaces.length && inlineFaces[faceIndex].offset < limit) faceIndex++;
-    if (!record.component || firstFace === faceIndex) continue;
-    const mesh = buildBodyMesh(inlineFaces.slice(firstFace, faceIndex));
-    if (mesh?.indices.length) inline.set(record.component, mesh);
+  if (displayLists && records.length) {
+    const inlineFaces = scanner.scan(displayLists);
+    let faceIndex = 0;
+    for (const [i, record] of records.entries()) {
+      while (faceIndex < inlineFaces.length && inlineFaces[faceIndex].offset < record.offset) faceIndex++;
+      const firstFace = faceIndex;
+      const limit = records[i + 1]?.offset ?? displayLists.length;
+      while (faceIndex < inlineFaces.length && inlineFaces[faceIndex].offset < limit) faceIndex++;
+      if (!record.component || firstFace === faceIndex) continue;
+      const mesh = buildBodyMesh(inlineFaces.slice(firstFace, faceIndex));
+      if (mesh?.indices.length) inline.set(record.component, mesh);
+    }
   }
 
   const directories = new Map<string, CacheRecord[]>();
-  const directory = container.find("FaceTessellations/Directory");
+  const references: CacheRecord[] = [];
+  const directory = container.find(DIRECTORY);
   if (directory?.size) {
     const bytes = await directory.read().catch(() => undefined);
     const cacheRecords = bytes && readCacheDirectory(bytes);
     if (!cacheRecords) warnings.push("the assembly face tessellation directory could not be read");
     for (const record of cacheRecords ?? []) {
+      if (!record.stream) {
+        references.push(record);
+        continue;
+      }
       const stream = directories.get(record.stream);
       if (stream) stream.push(record);
       else directories.set(record.stream, [record]);
@@ -235,12 +285,14 @@ export const readAssemblyMeshes = async (
   }
 
   const separate = new Map<string, SwMesh | null>();
+  const bySignature = new Map<string, SwMesh | null>();
   for (const [stream, cacheRecords] of directories) {
-    const entry = container.find("FaceTessellations/" + stream);
+    const name = TESSELLATION_PREFIX + stream;
+    const entry = container.find(name);
     const bytes = entry && await entry.read().catch(() => undefined);
     if (!bytes) continue;
     const { groups, nextBoundary } = indexCacheGroups(bytes, cacheRecords);
-    const faces = scan(bytes);
+    const faces = scanner.scan(bytes, name);
     const firstFaceByOffset = new Map(faces.map((face, i) => [face.offset, i]));
     const decoded = new Map<string, SwMesh>();
     for (const record of cacheRecords) {
@@ -256,8 +308,31 @@ export const readAssemblyMeshes = async (
       if (!mesh?.indices.length) continue;
       decoded.set(key, mesh);
       recordMesh(separate, record.instance, mesh);
+      recordMesh(bySignature, record.signature.join(":"), mesh);
     }
   }
+  // Repeated instances point at the row that stores their geometry.
+  for (const record of references) {
+    const mesh = bySignature.get(record.reference!.join(":"));
+    if (mesh) recordMesh(separate, record.instance, mesh);
+  }
+  return { records, inline, separate, warnings };
+};
+
+/** Reads saved assembly instances from the embedded display caches (no component tree). */
+export const readAssemblyMeshes = async (
+  container: SwContainer,
+  displayLists: Uint8Array,
+  maxVertices: number
+): Promise<{ meshes: SwMesh[]; warnings: string[] }> => {
+  if (!readComponentRecords(displayLists).length) {
+    return { meshes: [], warnings: ["the assembly has no supported component display records"] };
+  }
+  const { records, inline, separate, warnings } = await readDisplayCaches(
+    container,
+    displayLists,
+    new FaceScanner(maxVertices)
+  );
 
   const reusable = new Map<string, SwMesh | null>();
   const placed = new Map<Component, SwMesh>();
@@ -280,4 +355,222 @@ export const readAssemblyMeshes = async (
     warnings.push("assembly display geometry is unavailable for " + missing + " of " + records.length + " components");
   }
   return { meshes, warnings };
+};
+
+const textOf = (bytes: Uint8Array, alignment: number) =>
+  new TextDecoder("utf-16le").decode(bytes.subarray(alignment, alignment + ((bytes.length - alignment) & ~1)));
+
+/**
+ * Part keys in the order the cache streams store their bodies, from the instance names
+ * in `FaceTessellations/Directory` (ported from CAD-Viewer-Projekt). An instance only
+ * counts when a stream name follows it, so rows reusing other geometry are skipped.
+ * Files saved as a copy keep the old assembly name, so a second pass matches the
+ * instance name alone.
+ */
+const directoryOrder = (directory: Uint8Array, componentKeys: Map<string, string>) => {
+  const entries = [...componentKeys].map(([key, partKey]) => {
+    const bar = key.indexOf("|");
+    return { assembly: key.slice(0, bar), instance: key.slice(bar + 1), partKey };
+  });
+  for (const alignment of [0, 1]) {
+    const text = textOf(directory, alignment);
+    const hits: { start: number; end: number; partKey: string }[] = [];
+    for (const { assembly, instance, partKey } of entries) {
+      const needle = instance + "@" + assembly;
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (text[i + needle.length] !== "/") hits.push({ start: i, end: i + needle.length, partKey });
+      }
+    }
+    for (const { instance, partKey } of entries) {
+      const needle = instance + "@";
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+        if (hits.some((h) => h.start <= i && i < h.end)) continue;
+        let end = i + needle.length;
+        while (end < text.length && /[\p{L}\p{N} _.-]/u.test(text[end])) end++;
+        if (text[end] !== "/") hits.push({ start: i, end, partKey });
+      }
+    }
+    hits.sort((a, b) => a.start - b.start || b.end - a.end);
+    const unique = hits.filter((h, j) => j === 0 || h.start !== hits[j - 1].start);
+    const order: string[] = [];
+    unique.forEach((h, j) => {
+      const next = unique[j + 1]?.start ?? text.length;
+      if (/\d{3}-\d{3}-\d{3}/.test(text.slice(h.end, next))) order.push(h.partKey);
+    });
+    if (order.length) return order;
+  }
+  return [];
+};
+
+/** Body headers in a cache stream: index of the body whose faces follow. */
+const bodyHeaders = (bytes: Uint8Array, faceCount: number) => {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const heads: { offset: number; index: number }[] = [];
+  for (let o = 20; o + 20 <= bytes.length; o++) {
+    if (bytes[o] !== 1) continue;
+    if (v.getUint32(o, true) !== 1 || v.getUint32(o + 4, true) !== 1 || v.getUint32(o + 8, true) !== 0 || v.getUint32(o + 12, true) !== 0) continue;
+    if (bytes[o + 16] !== 0x96 || bytes[o + 18] !== 0x20 || bytes[o + 19] !== 0) continue;
+    const index = v.getUint32(o - 20, true);
+    const count = v.getUint32(o - 8, true);
+    if (index >= 1 && count >= 1 && count <= faceCount) heads.push({ offset: o, index });
+  }
+  return heads;
+};
+
+/**
+ * Fallback when the directory rows cannot be paired with cache groups: faces of every
+ * `FaceTessellations/*` stream are assigned to bodies by the body headers, and bodies to
+ * parts by the directory order (or, without a directory, by the order in which parts
+ * first appear in the tree). Ported from CAD-Viewer-Projekt (`parseAssembly`).
+ */
+export const facesByDirectoryOrder = (
+  streams: { name: string; bytes: Uint8Array; faces: FaceTess[] }[],
+  directory: Uint8Array | undefined,
+  tree: Pick<SwComponentTree, "componentKeys" | "leaves">
+) => {
+  let order = directory ? directoryOrder(directory, tree.componentKeys) : [];
+  if (!order.length) {
+    order = [...new Set(tree.leaves.filter((leaf) => !leaf.suppressed).map((leaf) => leaf.partKey))];
+  }
+  const faces = new Map<string, FaceTess[]>();
+  let body = 0;
+  for (const stream of [...streams].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const heads = bodyHeaders(stream.bytes, stream.faces.length);
+    // Without body headers, all faces would land on one part; only safe when one is left.
+    if (!heads.length && order.length - body > 1) {
+      body++;
+      continue;
+    }
+    let current = 0;
+    let h = 0;
+    for (const face of stream.faces) {
+      while (h < heads.length && heads[h].offset < face.offset) current = heads[h++].index;
+      const key = order[body + current];
+      if (key === undefined) continue;
+      const list = faces.get(key);
+      if (list) list.push(face);
+      else faces.set(key, [face]);
+    }
+    body += heads.reduce((max, head) => Math.max(max, head.index), 0) + 1;
+  }
+  return faces;
+};
+
+const filePathOf = (partKey: string) => partKey.slice(0, partKey.lastIndexOf("|")).toLowerCase();
+
+/** Places the tree's part instances with meshes from the display caches. */
+const placeTreeInstances = async (
+  container: SwContainer,
+  displayLists: Uint8Array | undefined,
+  tree: SwComponentTree,
+  scanner: FaceScanner
+) => {
+  const caches = await readDisplayCaches(container, displayLists, scanner);
+  const byPath = new Map<string, SwMesh | null>();
+  for (const [component, mesh] of caches.inline) recordMesh(byPath, instancePathOf(component.name), mesh);
+  for (const [instance, mesh] of caches.separate) if (mesh) recordMesh(byPath, instancePathOf(instance), mesh);
+
+  const rendered = tree.leaves.filter((leaf) => !leaf.suppressed);
+  const meshOf = new Map<SwTreeLeaf, SwMesh>();
+  const byPart = new Map<string, SwMesh>();
+  for (const leaf of rendered) {
+    const mesh = byPath.get(leaf.node.id);
+    if (!mesh) continue;
+    meshOf.set(leaf, mesh);
+    if (!byPart.has(leaf.partKey)) byPart.set(leaf.partKey, mesh);
+  }
+  for (const leaf of rendered) {
+    const mesh = !meshOf.has(leaf) && byPart.get(leaf.partKey);
+    if (mesh) meshOf.set(leaf, mesh);
+  }
+
+  let fallbackUsed = false;
+  if (rendered.some((leaf) => !meshOf.has(leaf))) {
+    const streams = [];
+    for (const entry of container.entries) {
+      if (!entry.name.startsWith(TESSELLATION_PREFIX) || entry.name === DIRECTORY || !entry.size) continue;
+      const bytes = await entry.read().catch(() => undefined);
+      if (bytes) streams.push({ name: entry.name, bytes, faces: scanner.scan(bytes, entry.name) });
+    }
+    if (streams.length) {
+      const directory = container.find(DIRECTORY);
+      const directoryBytes = directory?.size ? await directory.read().catch(() => undefined) : undefined;
+      const faces = facesByDirectoryOrder(streams, directoryBytes, tree);
+      const built = new Map<string, SwMesh | null>();
+      const build = (key: string, list: FaceTess[]) => {
+        if (!built.has(key)) {
+          const mesh = buildBodyMesh(list);
+          built.set(key, mesh?.indices.length ? mesh : null);
+        }
+        return built.get(key);
+      };
+      const byFile = new Map<string, string>();
+      for (const key of faces.keys()) if (!byFile.has(filePathOf(key))) byFile.set(filePathOf(key), key);
+      for (const leaf of rendered) {
+        if (meshOf.has(leaf)) continue;
+        const key = faces.has(leaf.partKey) ? leaf.partKey : byFile.get(filePathOf(leaf.partKey));
+        const mesh = key && build(key, faces.get(key)!);
+        if (mesh) {
+          meshOf.set(leaf, mesh);
+          fallbackUsed = true;
+        }
+      }
+    }
+  }
+
+  const meshes: SwMesh[] = [];
+  for (const leaf of rendered) {
+    const mesh = meshOf.get(leaf);
+    if (!mesh) continue;
+    meshes.push({
+      ...mesh,
+      name: leaf.node.name,
+      matrix: leaf.matrix,
+      componentId: leaf.node.id,
+      ...(leaf.node.hidden ? { visible: false } : {}),
+    });
+  }
+  const warnings = [...tree.warnings];
+  const missing = rendered.length - meshes.length;
+  if (missing) {
+    warnings.push(...caches.warnings);
+    warnings.push("assembly display geometry is unavailable for " + missing + " of " + rendered.length + " components");
+  } else if (fallbackUsed) {
+    warnings.push("assembly meshes were matched to components by the cache directory order");
+  }
+  return { meshes, warnings };
+};
+
+/**
+ * Reads an assembly: instances from the component tree (`swXmlContents/COMPINSTANCETREE`)
+ * when present, meshes from the embedded display caches. Without a usable tree, the
+ * placements stored with the caches are used.
+ */
+export const readAssembly = async (
+  container: SwContainer,
+  displayLists: Uint8Array | undefined,
+  maxVertices: number
+): Promise<{ meshes: SwMesh[]; components?: SwComponentNode[]; warnings: string[] }> => {
+  const treeEntry = container.find("swXmlContents/COMPINSTANCETREE");
+  const treeBytes = treeEntry?.size ? await treeEntry.read().catch(() => undefined) : undefined;
+  const tree = treeBytes && parseComponentTree(treeBytes);
+  if (!tree || !tree.roots.length) {
+    const warnings = treeBytes ? ["the assembly component tree could not be read"] : [];
+    if (!displayLists) return { meshes: [], warnings };
+    const legacy = await readAssemblyMeshes(container, displayLists, maxVertices);
+    return { meshes: legacy.meshes, warnings: [...warnings, ...legacy.warnings] };
+  }
+  const placed = await placeTreeInstances(container, displayLists, tree, new FaceScanner(maxVertices));
+  if (!placed.meshes.length && displayLists && tree.leaves.some((leaf) => !leaf.suppressed)) {
+    // The tree did not match the caches at all; fall back to the cache placements.
+    const legacy = await readAssemblyMeshes(container, displayLists, maxVertices);
+    if (legacy.meshes.length) {
+      return {
+        meshes: legacy.meshes,
+        components: tree.roots,
+        warnings: [...placed.warnings, "assembly meshes are placed without the component tree", ...legacy.warnings],
+      };
+    }
+  }
+  return { meshes: placed.meshes, components: tree.roots, warnings: placed.warnings };
 };

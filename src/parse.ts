@@ -3,7 +3,7 @@ import {
   openSwContainer,
   type SwContainer,
 } from "./container.ts";
-import { readAssemblyMeshes } from "./assembly.ts";
+import { readAssembly } from "./assembly.ts";
 import { buildBodyMesh, MAX_VERTICES, scanFaceTables } from "./displayMesh.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
 import { readBodyColor, readFaceColors } from "./visualProps.ts";
@@ -39,13 +39,13 @@ export const parseSwFile = async (
 
   if (kind === "assembly") {
     let meshes: SwParseResult["meshes"] = [];
+    let components: SwParseResult["components"];
     try {
       const displayLists = await readOptional(c, "Contents/DisplayLists");
-      if (displayLists) {
-        const assembly = await readAssemblyMeshes(c, displayLists, MAX_VERTICES);
-        meshes = assembly.meshes;
-        warnings.push(...assembly.warnings);
-      }
+      const assembly = await readAssembly(c, displayLists, MAX_VERTICES);
+      meshes = assembly.meshes;
+      components = assembly.components;
+      warnings.push(...assembly.warnings);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`could not read the assembly display cache: ${message}`);
@@ -55,7 +55,7 @@ export const parseSwFile = async (
         ? "no renderable assembly cache; showing the thumbnail"
         : "no renderable assembly cache or thumbnail");
     }
-    return { kind, version, meshes, preview, warnings };
+    return { kind, version, meshes, ...(components ? { components } : {}), preview, warnings };
   }
 
   const displayLists = await readOptional(c, "Contents/DisplayLists");
