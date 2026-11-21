@@ -24,8 +24,6 @@ export interface SwDrawingContent {
   meshes: SwMesh[];
   sheets: SwSheet[];
   components?: SwComponentNode[];
-  /** BMP converted from the `Preview` DIB. */
-  previewBmp?: Uint8Array;
   warnings: string[];
 }
 
@@ -206,8 +204,6 @@ export const readDrawingModel = async (c: SwContainer, maxVertices: number) => {
 export const readDrawing = async (c: SwContainer, maxVertices: number): Promise<SwDrawingContent> => {
   const warnings: string[] = [];
   const sheets = await readSheets(c);
-  const previewRaw = await readEntry(c, "Preview").catch(() => undefined);
-  const previewBmp = previewRaw && previewDibToBmp(previewRaw);
   let model: Awaited<ReturnType<typeof readDrawingModel>> = { meshes: [], warnings: [] };
   try {
     model = await readDrawingModel(c, maxVertices);
@@ -216,5 +212,5 @@ export const readDrawing = async (c: SwContainer, maxVertices: number): Promise<
     warnings.push(`could not read the drawing's model cache: ${message}`);
   }
   warnings.push(...model.warnings);
-  return { meshes: model.meshes, sheets, components: model.components, previewBmp, warnings };
+  return { meshes: model.meshes, sheets, components: model.components, warnings };
 };

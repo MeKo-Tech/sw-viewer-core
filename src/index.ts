@@ -14,6 +14,7 @@ export {
   signedVolume,
 } from "./displayMesh.ts";
 export { parseSwFile } from "./parse.ts";
+export { readSwPreview, type SwPreviewImage } from "./preview.ts";
 export type { SwParseReply, SwParseRequest } from "./protocol.ts";
 export type {
   Rgb,

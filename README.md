@@ -19,8 +19,19 @@ import { parseSwFile } from "@meko-tech/sw-viewer-core";
 const r = await parseSwFile(new Uint8Array(buffer));
 // r.meshes[0]: { positions (mm), normals, indices, color?, faceRanges }
 // Each face range can have color. Assembly instances have name and matrix.
-// r.preview:   PNG bytes (fallback when r.meshes is empty)
+// r.preview:   thumbnail bytes, PNG or BMP (r.previewType); fallback when r.meshes is empty
 // r.warnings
+```
+
+For a list or card thumbnail, `readSwPreview` reads only the embedded image
+(`PreviewPNG`, else the `Preview` bitmap as BMP, else a drawing's first sheet).
+It decodes no geometry, takes a few milliseconds and is fine on the main thread:
+
+```ts
+import { readSwPreview } from "@meko-tech/sw-viewer-core";
+
+const img = await readSwPreview(new Uint8Array(buffer)); // { bytes, type } | undefined
+if (img) imgEl.src = URL.createObjectURL(new Blob([img.bytes], { type: img.type }));
 ```
 
 In an app, parse in the worker and let `parseSwInWorker` terminate it after a

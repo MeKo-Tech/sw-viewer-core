@@ -6,6 +6,7 @@ import {
 import { readAssembly } from "./assembly.ts";
 import { readDrawing } from "./drawing.ts";
 import { buildBodyMesh, MAX_VERTICES, scanFaceTables } from "./displayMesh.ts";
+import { readContainerPreview } from "./preview.ts";
 import { readProperties } from "./properties.ts";
 import { analyzeResult } from "./geometry/analyze.ts";
 import type { SwDocumentKind, SwParseResult } from "./types.ts";
@@ -47,14 +48,15 @@ const decodeSwFile = async (
   const c = openSwContainer(bytes);
   const kind = documentKind(c);
   const warnings: string[] = [];
-  const preview = await readOptional(c, "PreviewPNG");
+  const embedded = await readContainerPreview(c, { sheets: false });
+  const preview = embedded?.bytes;
+  const previewType = embedded?.type === "image/bmp" ? embedded.type : undefined;
   const version = containerVersion(c);
   const properties = await readProperties(c);
 
   if (kind === "drawing") {
     const drawing = await readDrawing(c, MAX_VERTICES);
     warnings.push(...drawing.warnings);
-    const previewType = !preview && drawing.previewBmp ? "image/bmp" : undefined;
     if (!drawing.meshes.length && !drawing.sheets.length) {
       warnings.push("the drawing contains no sheet image or cached model");
     }
@@ -62,7 +64,7 @@ const decodeSwFile = async (
       kind,
       version,
       meshes: drawing.meshes,
-      preview: preview ?? drawing.previewBmp,
+      preview,
       ...(previewType ? { previewType } : {}),
       ...(drawing.components ? { components: drawing.components } : {}),
       sheets: drawing.sheets,
@@ -89,7 +91,7 @@ const decodeSwFile = async (
         ? "no renderable assembly cache; showing the thumbnail"
         : "no renderable assembly cache or thumbnail");
     }
-    return { kind, version, meshes, ...(components ? { components } : {}), preview, properties, warnings };
+    return { kind, version, meshes, ...(components ? { components } : {}), preview, ...(previewType ? { previewType } : {}), properties, warnings };
   }
 
   const displayLists = await readOptional(c, "Contents/DisplayLists");
@@ -119,6 +121,7 @@ const decodeSwFile = async (
     version,
     meshes: mesh ? [mesh] : [],
     preview,
+    ...(previewType ? { previewType } : {}),
     properties,
     warnings,
   };
