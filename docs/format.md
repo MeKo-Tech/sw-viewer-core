@@ -79,7 +79,7 @@ layout was first worked out in MeKo's CAD-Viewer-Projekt (`src/sw.js`,
 | --- | --- |
 | `Images/Sheet_<n>` | `sheets[n].image`, PNG (640×480 in the sample) |
 | `SheetPreviews/SheetNames` | sheet names: u16 count, then one MFC Unicode CString per sheet |
-| `Preview` | u32 length (= stream length − 4), then a Windows DIB (BITMAPINFOHEADER, often RLE8). A 14-byte `BM` file header turns it into a BMP. It is used as `preview` (`previewType: "image/bmp"`) only without `PreviewPNG`. The sample is 2858×1499. |
+| `Preview` | u32 length (= stream length − 4), then a Windows DIB (BITMAPINFOHEADER, often RLE8). A 14-byte `BM` file header turns it into a BMP. It is used as `preview` (`previewType: "image/bmp"`) only without `PreviewPNG`; the same holds for parts and assemblies. `readSwPreview` (src/preview.ts) tries `PreviewPNG`, then this bitmap, then the first sheet image. The sample is 2858×1499. |
 | `Contents/VBLists` | cached 3D display data. Each referenced part has one block of face tables (same channels as `DisplayLists`) in **part coordinates**. The block is preceded by the model name and the part's full path, both MFC Unicode CStrings. Later mentions of the same path carry no faces. |
 | `swXmlContents/xmlstream-<n>` | component tree of the referenced assembly, with the same schema as `COMPINSTANCETREE`. `swTransform` holds 16 numbers that read directly as a column-major matrix (translation in metres). Child placements compose as parent × child. |
 

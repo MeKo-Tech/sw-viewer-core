@@ -241,16 +241,17 @@ export function SwViewer({
 
   // Thumbnail fallback for results without display meshes.
   const previewBytes = preview && effective && !effective.meshes.length ? effective.preview : undefined;
+  const previewType = effective?.previewType ?? "image/png";
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!previewBytes?.length) {
       setPreviewUrl(null);
       return;
     }
-    const url = URL.createObjectURL(new Blob([previewBytes as Uint8Array<ArrayBuffer>], { type: "image/png" }));
+    const url = URL.createObjectURL(new Blob([previewBytes as Uint8Array<ArrayBuffer>], { type: previewType }));
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [previewBytes]);
+  }, [previewBytes, previewType]);
 
   // The canvas and overlays fill the container, so it must be positioned. Only a
   // container the app left static is made relative; its own position (inline or from a
